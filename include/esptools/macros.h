@@ -13,6 +13,10 @@
 #endif
 
 #ifdef _MSC_VER
+/* 
+ * C4200: nonstandard extension used : zero-sized array in struct/union
+ *     this fires upon use of FAMs even in C17 mode
+ */
 #define ESP_WARNING_PUSH \
     _Pragma("warning(push)") \
     _Pragma("warning(disable: 4200)")

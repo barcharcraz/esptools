@@ -16,7 +16,11 @@ add_library(esptools SHARED)
 target_include_directories(esptools PUBLIC include)
 target_sources(esptools PRIVATE
     src/win32_memory_mapping.c
-    src/parseutils.c)
+    src/win32_fileio.c
+    src/parseutils.c
+    src/compact.c
+    src/records.c
+    )
 target_compile_definitions(esptools PRIVATE
     $<$<STREQUAL:$<TARGET_PROPERTY:esptools,TYPE>,STATIC_LIBRARY>:ESP_STATIC>
 )

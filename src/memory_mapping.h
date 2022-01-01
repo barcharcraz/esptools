@@ -1,6 +1,7 @@
 #include <esptools/macros.h>
 #include <esptools/types.h>
 
+ESP_WARNING_PUSH
 ESP_BEGIN_DECLS
 
 ESP_EXPORT_TEST void* esp_map_file_ro(size_t len, espnativefd fd);
@@ -21,3 +22,4 @@ int esp_unmap_file_byname(struct esp_map_file_byname_result to_unmap);
 
 
 ESP_END_DECLS
+ESP_WARNING_POP

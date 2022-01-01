@@ -4,3 +4,4 @@
 #include <esptools/macros.h>
 #include <esptools/types.h>
 #include <esptools/records.h>
+#include <esptools/compact.h>

@@ -1,5 +1,9 @@
 #pragma once
+#include <esptools/macros.h>
 #include <stddef.h>
+
+ESP_WARNING_PUSH
+ESP_BEGIN_DECLS
 
 #ifdef _WIN32
 typedef wchar_t esppathchar;
@@ -21,3 +25,10 @@ typedef void* espnativefd;
 typedef int espnativefd;
 #endif
 
+struct esp_zs_array_view {
+    size_t len;
+    char* data;
+};
+
+ESP_END_DECLS
+ESP_WARNING_POP
