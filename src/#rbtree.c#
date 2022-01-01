@@ -1,0 +1,15 @@
+#include "rbtree.h"
+#include <string.h>
+#define ESP_RBTREE_INST(pfx, instname, type)				\
+  struct pfx##_##instname##_rbtree_node {				\
+    struct pfx##_##instname##_rbtree_node *left;			\
+    struct pfx##_##instname##_rbtree_node *right;			\
+    type data;								\
+  };									\
+  struct pfx##_##instname##_rbtree_node*				\
+  pfx##_##insname##_rbtree_node_new(void) {				\
+    return malloc(sizeof(struct pfx##_##instname##_rbtree_node));	\
+  }
+  
+  
+    

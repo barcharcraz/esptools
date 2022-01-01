@@ -20,6 +20,7 @@ target_sources(esptools PRIVATE
     src/parseutils.c
     src/compact.c
     src/records.c
+    src/rbtree.c
     )
 target_compile_definitions(esptools PRIVATE
     $<$<STREQUAL:$<TARGET_PROPERTY:esptools,TYPE>,STATIC_LIBRARY>:ESP_STATIC>
