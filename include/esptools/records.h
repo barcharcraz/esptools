@@ -61,13 +61,22 @@ struct esp_HEDR_TES4 {
 /**
  *  esp_record_next_field
  * 
- * @param rec 
- * @param prv_field 
- * @param field_size 
- * @return ESP_EXPORT struct* 
+ * @rec: (transfer none): record
+ * @prv_field: (transfer none): previous (or "current") field
+ * @field_size: (nullable, inout): the true size of the returned field
+ *    in most cases this is equal to field->field_size, however if
+ *    prv_field is an XXXX field then it's set to the data of that field
+ *    when calling this function, if this parameter is not null it should be
+ *    set to the "true size" of prv_field.
+ * 
+ *    It is an error to call this function with field_size set to null
+ *    if prev_field is of type XXXX, or, if the "true size" of prv_field
+ *    was determined from an XXXX record
+ * 
+ * returns: (transfer none): a pointer to the next field
  */
 ESP_EXPORT struct esp_field *
-esp_record_next_field(struct esp_record const *rec,
+esp_record_next_field(struct esp_record *rec,
                       struct esp_field const *prv_field,
                       uint32_t* field_size);
 
