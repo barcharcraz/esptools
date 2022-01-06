@@ -46,14 +46,10 @@ esp_map_file_ro_byname(esppathchar *filepath) {
   result.addr = esp_map_file_ro(result.len, fileH);
 
 err_file:
-  if(!CloseHandle(fileH)) {
+  if(!CloseHandle(fileH))
     abort();
-  }
 err_exit:
   return result;
 
 }
 
-int esp_unmap_file_byname(struct esp_map_file_byname_result to_unmap) {
-  return esp_unmap_file(to_unmap.addr, to_unmap.len);
-}

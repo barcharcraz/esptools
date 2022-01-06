@@ -6,9 +6,5 @@
 #include <assert.h>
 
 int main(void) {
-    int tint = 'TES4';
-    const char* tz = "TES4";
-    int tint2 = *(uint32_t*)tz;
-    assert(tint == tint2);
     return 0;
 }

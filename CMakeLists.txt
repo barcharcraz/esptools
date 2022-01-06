@@ -8,15 +8,26 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_EXTENSIONS ON)
 include(CTest)
 
+set(GCC_OPTIONS
+# warnings
+-Wall -Wextra
+-Wformat=2 -Wformat-overflow=2
+-Wformat-signedness -Wformat-truncation=2
+-Wstrict-aliasing=1
+# switches
+-fms-extensions
+)
+
 add_compile_options(
     "$<$<COMPILE_LANG_AND_ID:C,MSVC>:/W4>"
+    "$<$<COMPILE_LANG_AND_ID:C,GNU>:${GCC_OPTIONS}>"
 )
 
 add_library(esptools SHARED)
 target_include_directories(esptools PUBLIC include)
 target_sources(esptools PRIVATE
-    src/win32_memory_mapping.c
-    src/win32_fileio.c
+    src/memory_mapping.c
+    src/fileio.c
     src/parseutils.c
     src/compact.c
     src/records.c

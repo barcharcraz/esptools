@@ -1,6 +1,5 @@
 #include "memory_mapping.h"
 #include "testconfig.h"
-#include <Windows.h>
 #include <assert.h>
 #include <esptools/macros.h>
 #include <stdio.h>

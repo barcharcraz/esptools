@@ -1,2 +1,4 @@
 BasedOnStyle: LLVM
 IndentWidth: 2
+SortIncludes: true
+IndentPPDirectives: BeforeHash
