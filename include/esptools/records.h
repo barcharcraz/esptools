@@ -56,12 +56,6 @@ struct esp_field {
   uint8_t data[];
 };
 
-struct esp_HEDR_TES4 {
-  float version;
-  uint32_t nr_recs;
-  uint32_t nxt_id;
-};
-
 ESP_EXPORT struct esp_field*
 esp_record_first_field(struct esp_record* rec);
 
@@ -70,7 +64,7 @@ esp_record_first_field(struct esp_record* rec);
  *
  * @rec: (transfer none): record
  * @prv_field: (transfer none, nullable): previous (or "current") field
- * @field_size: (nullable, inout): the true size of the returned field in most
+ * @field_size: (nullable, inout): the true size of the returned field. in most
  *    cases this is equal to field->field_size, however if prv_field is an XXXX
  *    field then it's set to the data of that field when calling this function,
  *    if this parameter is not null it should be set to the "true size" of

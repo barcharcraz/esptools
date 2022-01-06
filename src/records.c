@@ -27,17 +27,22 @@ struct esp_field *esp_record_next_field(struct esp_record *rec,
   } else {
     true_size_of_prv = prv_field->field_size;
   }
-  size_t prv_field_offset = (uint8_t *)rec - (uint8_t *)prv_field;
-  if ((prv_field_offset + true_size_of_prv) >=
-      (rec->data_size + sizeof(struct esp_record_header))) {
+  // offset into rec->data (not from the start of rec)
+
+  size_t prv_field_offset =
+      (uint8_t *)prv_field - (uint8_t *)rec - sizeof(struct esp_record_header);
+  size_t next_field_offset =
+      prv_field_offset + true_size_of_prv + sizeof(struct esp_field_header);
+  if (next_field_offset >= rec->data_size) {
     return NULL;
   }
+
   result =
-      (struct esp_field *)(rec->data + prv_field_offset + true_size_of_prv);
-  if (strncmp(prv_field->type, "XXXX", 4) == 0) {
+      (struct esp_field *)(rec->data + next_field_offset);
+  if (memcmp(prv_field->type, "XXXX", 4) == 0) {
     *field_size = *(uint32_t *)prv_field->data;
   } else {
-    *field_size = prv_field->field_size;
+    *field_size = result->field_size;
   }
   return result;
 }

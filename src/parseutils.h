@@ -1,3 +1,6 @@
+// Copyright (c) Charles Barto
+// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only
+
 #pragma once
 #include <assert.h>
 #include <esptools/macros.h>
