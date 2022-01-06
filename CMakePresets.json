@@ -1,0 +1,23 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "x64-windows-debug",
+            "description": "VS 2022 (Ninja) debug mode",
+            "generator": "Ninja",
+            "toolset": {
+              "value": "host=x64"
+            },
+            "architecture":{
+              "value": "x64"
+            },
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            }
+        }
+    ]
+}

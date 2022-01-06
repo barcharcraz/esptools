@@ -31,7 +31,6 @@ target_sources(esptools PRIVATE
     src/parseutils.c
     src/compact.c
     src/records.c
-    src/rbtree.c
     )
 target_compile_definitions(esptools PRIVATE
     $<$<STREQUAL:$<TARGET_PROPERTY:esptools,TYPE>,STATIC_LIBRARY>:ESP_STATIC>
@@ -51,6 +50,8 @@ include_directories(src)
 add_executable(test_just_compile tests/test_just_compile.c)
 add_executable(test_memory_mapping tests/test_memory_mapping.c)
 add_executable(test_empty_esp_header tests/test_empty_esp_header.c)
+add_executable(test_bst tests/test_bst.c)
 
 add_test(NAME test_memory_mapping COMMAND test_memory_mapping)
 add_test(NAME test_empty_esp_header COMMAND test_empty_esp_header)
+add_test(NAME test_bst COMMAND test_bst)

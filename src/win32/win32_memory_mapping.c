@@ -24,6 +24,7 @@ void *esp_map_file_ro(size_t len, espnativefd fd) {
 }
 
 int esp_unmap_file(void *addr, size_t len) {
+  (void) len;
   if (!UnmapViewOfFile(addr)) {
     return -1;
   }
