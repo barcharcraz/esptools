@@ -1,5 +1,5 @@
 
-use std::mem::transmute;
+use std::mem::{size_of_val, size_of, transmute};
 
 #[repr(packed)]
 pub struct RecordHeader {
@@ -49,12 +49,27 @@ pub struct Field {
 }
 
 impl Record {
-    pub unsafe fn first_field(&self) -> Option<&Field> {
-        if self.header.data_size == 0 {
-            None
-        } else {
-            let fheader = &transmute::<&u8, &FieldHeader>(&self.data[0]);
-            Some(transmute::<(&u8, usize), &Field>((&self.data[0], fheader.field_size as usize)))
+    pub fn first_field(&self) -> Option<&Field> {
+        fn first_field_header(rec: &Record) -> Option<&FieldHeader> {
+            if size_of_val(&rec.data) < size_of::<FieldHeader>() {
+                None
+            } else {
+                unsafe {
+                    Some(transmute::<&u8, &FieldHeader>(&rec.data[0]))
+                }
+            }
+        }
+        match first_field_header(self) {
+            None => None,
+            Some(header) => {
+                if size_of_val(&self.data) < size_of::<FieldHeader>() + header.field_size as usize {
+                    None
+                } else {
+                    unsafe {
+                        Some(transmute::<(&FieldHeader, usize), &Field>((header, header.field_size as usize)))
+                    }
+                }
+            }
         }
     }
 }
