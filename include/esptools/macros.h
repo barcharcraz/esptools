@@ -17,7 +17,7 @@
    * C4200: nonstandard extension used : zero-sized array in struct/union
    *     this fires upon use of FAMs even in C17 mode
    */
-  #define ESP_WARNING_PUSH                                                     \
+  #define ESP_WARNING_PUSH \
     _Pragma("warning(push)") _Pragma("warning(disable: 4200)")
 
   #define ESP_WARNING_POP _Pragma("warning(pop)")
@@ -55,3 +55,12 @@
 #else
   #define ESP_EXPORT_TEST
 #endif
+
+// similar to "assert" but is never disabled
+#define ESP_CHECK(expr, msg) \
+  do { \
+    if (!(expr)) { \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, msg); \
+      abort(); \
+    } \
+  } while (0)

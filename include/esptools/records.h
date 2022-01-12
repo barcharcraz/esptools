@@ -3,6 +3,7 @@
 
 #pragma once
 #include <assert.h>
+#include <esptools/esp_file_mmap.h>
 #include <esptools/macros.h>
 #include <stdint.h>
 ESP_WARNING_PUSH
@@ -56,8 +57,18 @@ struct esp_field {
   uint8_t data[];
 };
 
-ESP_EXPORT struct esp_field*
-esp_record_first_field(struct esp_record* rec);
+ESP_EXPORT struct esp_group *esp_file_first_group(struct esp_file_mmap *file);
+
+ESP_EXPORT struct esp_group *
+esp_file_next_group(struct esp_file_mmap *file, struct esp_group const *prv_group);
+
+ESP_EXPORT struct esp_group *
+esp_file_next_named_group(struct esp_file_mmap *file,
+                          struct esp_group const *prv_group,
+                          const char group_name[4]);
+
+ESP_EXPORT
+struct esp_field *esp_record_first_field(struct esp_record *rec);
 
 /**
  *  esp_record_next_field
@@ -82,15 +93,11 @@ esp_record_first_field(struct esp_record* rec);
  *  there are no more fields
  */
 ESP_EXPORT struct esp_field *
-esp_record_next_field(struct esp_record *rec,
-                      struct esp_field const *prv_field,
-                      uint32_t* field_size);
+esp_record_next_field(struct esp_record *rec, struct esp_field const *prv_field,
+                      uint32_t *field_size);
 
-
-
-ESP_EXPORT struct esp_field*
-esp_record_field_bytype(struct esp_record* rec,
-  const char type[4]);
+ESP_EXPORT struct esp_field *esp_record_field_bytype(struct esp_record *rec,
+                                                     const char type[4]);
 
 ESP_END_DECLS
 ESP_WARNING_POP
