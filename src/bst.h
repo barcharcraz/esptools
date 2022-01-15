@@ -139,10 +139,10 @@ ESP_BEGIN_DECLS
   struct instance_name##_node *instance_name_node_new(void); \
   struct instance_name##_node *instance_name_node_new_with_data( \
       keytype key, keytype value); \
-  void instance_name_node_free(struct instance_name##_node *node); \
-  int instance_name_insert_node(struct instance_name##_node **root, \
+  void instance_name##_node_free(struct instance_name##_node *node); \
+  int instance_name##_insert_node(struct instance_name##_node **root, \
                                 struct instance_name##_node *new); \
-  void instance_name_remove_node(struct instance_name##_node **node);
+  void instance_name##_remove_node(struct instance_name##_node **node);
 
 ESP_END_DECLS
 ESP_WARNING_POP
