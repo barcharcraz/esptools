@@ -50,7 +50,6 @@ struct esp_group *esp_file_next_named_group(struct esp_file_mmap *file,
                                             struct esp_group const *prv_group,
                                             const char group_name[4]) {
   assert(memcmp(prv_group->type, "GRUP", 4) == 0);
-  struct 
 }
 
 struct esp_field *esp_record_next_field(struct esp_record *rec,
