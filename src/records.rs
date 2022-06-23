@@ -59,16 +59,12 @@ impl Record {
                 }
             }
         }
-        match first_field_header(self) {
-            None => None,
-            Some(header) => {
-                if size_of_val(&self.data) < size_of::<FieldHeader>() + header.field_size as usize {
-                    None
-                } else {
-                    unsafe {
-                        Some(transmute::<(&FieldHeader, usize), &Field>((header, header.field_size as usize)))
-                    }
-                }
+        let header = first_field_header(self)?;
+        if size_of_val(&self.data) < size_of::<FieldHeader>() + header.field_size as usize {
+            None
+        } else {
+            unsafe {
+                Some(transmute::<(&FieldHeader, usize), &Field>((header, header.field_size as usize)))
             }
         }
     }
