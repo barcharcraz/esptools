@@ -1,0 +1,5 @@
+[submodule "CommonLibSSE-ng-sys/CommonLibSSE-NG"]
+	path = CommonLibSSE-ng-sys/CommonLibSSE-NG
+	url = https://github.com/CharmedBaryon/CommonLibSSE-NG.git
+	sparse-checkout = include
+	shallow = true
