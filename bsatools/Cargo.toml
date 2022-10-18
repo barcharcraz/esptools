@@ -2,6 +2,11 @@
 name = "bsatools"
 version = "0.1.0"
 license = "GPL-2.0 or GPL-3.0"
+edition = "2021"
 
 [lib]
 path = "lib.rs"
+
+[dependencies]
+bitflags = "*"
+nom = "*"

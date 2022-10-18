@@ -1,4 +1,2 @@
 [workspace]
-members = [
- "bsatools",
-]
+members = ["bsatools", "CommonLibSSE-NG-sys"]

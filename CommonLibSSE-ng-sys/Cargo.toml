@@ -1,2 +1,11 @@
 [package]
-name = "CommonLibSSE-ng-sys"
+name = "CommonLibSSE-NG-sys"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "commonlib_sse_ng_sys"
+path = "lib.rs"
+
+[build-dependencies]
+bindgen = "*"
