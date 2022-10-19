@@ -62,7 +62,7 @@ pub struct ArchiveHeader {
     pad: MaybeUninit<u16>
 }
 
-const _: () = assert_eq!(std::mem::size_of::<ArchiveHeader>(), 36usize, "bad size");
+const _: () = assert!(std::mem::size_of::<ArchiveHeader>() == 36usize);
 
 #[repr(C)]
 #[derive(Debug)]
@@ -74,7 +74,7 @@ pub struct DirectoryRecord {
     pad2: MaybeUninit<u32>
 }
 
-const _: () = assert_eq!(std::mem::size_of::<DirectoryRecord>(), 24usize, "bad size");
+const _: () = assert!(std::mem::size_of::<DirectoryRecord>() == 24usize);
 
 
 #[repr(C)]
@@ -113,14 +113,12 @@ pub enum TryFromArchiveError {
 }
 
 impl ArchiveHeader {
-    type Error = TryFromArchiveError;
 
-    fn try_from(value: T) -> Result<Self, Self::Error> {
+    fn try_from(value: &mut impl Buf) -> Result<Self, TryFromArchiveError> {
         assert!(value.remaining() >= size_of::<Self>());
         use TryFromArchiveError::*;
-        let v = value.into_iter();
-        let mut tag: [u8; 4];
-        value.copy_to_slice(&tag);
+        let mut tag = [0u8; 4];
+        value.copy_to_slice(&mut tag);
         if &tag != b"BSA\0" {
             return Err(InvalidTag)
         }
@@ -128,14 +126,14 @@ impl ArchiveHeader {
         // even for x360
         Ok(Self {
                     tag,
-                    version: ArchiveVersion::from_primitive(value.get_u32_le()).ok_or(ParseError)?,
+                    version: value.get_u32_le(),
                     offset: value.get_u32_le(),
-                    flags: ArchiveFlags::from_bits(value.get_u32_le()).ok_or(ParseError)?,
+                    flags: value.get_u32_le(),
                     folder_count: value.get_u32_le(),
                     file_count: value.get_u32_le(),
                     total_folder_name_length: value.get_u32_le(),
                     total_file_name_length: value.get_u32_le(),
-                    file_flags: FileFlags::from_bits(value.get_u16_le()).ok_or(ParseError)?,
+                    file_flags: value.get_u16_le(),
                     pad: MaybeUninit::uninit()
                 })
     }
@@ -143,26 +141,25 @@ impl ArchiveHeader {
 
 
 
-impl<T: Read> FromEndian<T> for DirectoryRecord {
+impl<T: Read> FromEndian<&mut T> for DirectoryRecord {
 
-    fn from_endian<E: ByteOrder>(value: T) -> Self {
-        let r = value.reader();
+    fn from_endian<E: ByteOrder>(value: &mut T) -> Self {
         Self {
-            hash: value.read_u64::<E>(),
-            count: value.read_u64::<E>(),
-            pad1: {value.read_u64::<E>(); MaybeUninit::uninit()},
-            offset: value.read_u64::<E>(),
+            hash: value.read_u64::<E>().unwrap(),
+            count: value.read_u32::<E>().unwrap(),
+            pad1: {value.read_u32::<E>(); MaybeUninit::uninit()},
+            offset: value.read_u32::<E>().unwrap(),
             pad2: MaybeUninit::uninit()
         }
     }
 }
 
-impl<T: Read> FromEndian<T> for FileRecord {
-    fn from_endian<E: ByteOrder>(value: T) -> Self {
+impl<T: Read> FromEndian<&mut T> for FileRecord {
+    fn from_endian<E: ByteOrder>(value: &mut T) -> Self {
         Self {
-            hash: value.read_u64::<E>(),
-            size: value.read_u32::<E>(),
-            offset: value.read_u32::<E>()
+            hash: value.read_u64::<E>().unwrap(),
+            size: value.read_u32::<E>().unwrap(),
+            offset: value.read_u32::<E>().unwrap()
         }
     }
 }
