@@ -1,8 +1,28 @@
 
-use std::mem::{size_of_val, size_of, transmute};
 
-#[repr(packed)]
+use std::mem::{size_of_val, size_of, transmute};
+use std::ptr::addr_of;
+
+use crate::common::ConstantSizedRecord;
+
+
+
+impl ConstantSizedRecord for RecordHeader {
+    const SIZE: usize = size_of::<RawRecordHeader>();
+}
+
 pub struct RecordHeader {
+    pub typ: [u8; 4],
+    pub data_size: u32,
+    pub flags: u32,
+    pub form_id: u32,
+    pub timestamp: u16,
+    pub vcs_info: u16,
+    pub internal_version: u16,
+}
+
+#[repr(C)]
+pub struct RawRecordHeader {
     pub typ: [u8; 4],
     pub data_size: u32,
     pub flags: u32,
@@ -13,58 +33,71 @@ pub struct RecordHeader {
     pub unknown: u16
 }
 
-#[repr(packed)]
 pub struct GroupHeader {
     pub typ: [u8; 4],
     pub group_size: u32,
     pub label: [u8; 4],
-    pub group_type: i32,
+    pub group_type: u32,
+    pub timestamp: u16,
+    pub vcs_info: u16,
+}
+
+impl ConstantSizedRecord for GroupHeader {
+    const SIZE: usize = size_of::<RawGroupHeader>();
+}
+
+#[repr(C)]
+pub struct RawGroupHeader {
+    pub typ: [u8; 4],
+    pub group_size: u32,
+    pub label: [u8; 4],
+    pub group_type: u32,
     pub timestamp: u16,
     pub vcs_info: u16,
     pub unknown: u32
 }
 
-#[repr(packed)]
-pub struct FieldHeader {
+#[repr(C)]
+pub struct RawFieldHeader {
     pub typ: [u8; 4],
     // sometimes field_size is a lie
     pub field_size: u16,
 }
-#[repr(packed)]
+#[repr(C)]
 pub struct Record {
-    pub header: RecordHeader,
+    pub header: RawRecordHeader,
     pub data: [u8]
 }
 
-#[repr(packed)]
+#[repr(C)]
 pub struct Group {
-    pub header: GroupHeader,
+    pub header: RawGroupHeader,
     pub data: [u8]
 }
 
-#[repr(packed)]
+#[repr(C)]
 pub struct Field {
-    pub header: FieldHeader,
+    pub header: RawFieldHeader,
     pub data: [u8]
 }
 
 impl Record {
     pub fn first_field(&self) -> Option<&Field> {
-        fn first_field_header(rec: &Record) -> Option<&FieldHeader> {
-            if size_of_val(&rec.data) < size_of::<FieldHeader>() {
+        fn first_field_header(rec: &Record) -> Option<&RawFieldHeader> {
+            if size_of_val(&rec.data) < size_of::<RawFieldHeader>() {
                 None
             } else {
                 unsafe {
-                    Some(transmute::<&u8, &FieldHeader>(&rec.data[0]))
+                    Some(transmute::<&u8, &RawFieldHeader>(&rec.data[0]))
                 }
             }
         }
         let header = first_field_header(self)?;
-        if size_of_val(&self.data) < size_of::<FieldHeader>() + header.field_size as usize {
+        if size_of_val(&self.data) < size_of::<RawFieldHeader>() + header.field_size as usize {
             None
         } else {
             unsafe {
-                Some(transmute::<(&FieldHeader, usize), &Field>((header, header.field_size as usize)))
+                Some(transmute::<(&RawFieldHeader, usize), &Field>((header, header.field_size as usize)))
             }
         }
     }
@@ -84,13 +117,14 @@ mod tests {
         let empty = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/empty.esm");
         let file = File::open(empty)?;
         let mmap = unsafe { Mmap::map(&file)? };
-        let recHdr = unsafe { &*(mmap.as_ptr() as *const RecordHeader) };
-        assert_eq!(recHdr.typ, [b'T', b'E', b'S', b'4']);
-        assert_eq!(recHdr.data_size, 52);
-        let record = unsafe { transmute::<(&RecordHeader, usize), &Record>((recHdr, recHdr.data_size as usize + size_of::<RecordHeader>())) };
-        assert_eq!(record.header.typ, [b'T', b'E', b'S', b'4']);
-        assert_eq!(record.header.data_size, 52);
-        
+        unsafe {
+            let recHdr = &*(mmap.as_ptr() as *const RawRecordHeader);
+            assert_eq!(recHdr.typ, [b'T', b'E', b'S', b'4']);
+            assert_eq!(addr_of!(recHdr.data_size).read_unaligned(), 52);
+            let record = transmute::<(&RawRecordHeader, usize), &Record>((recHdr, recHdr.data_size as usize + size_of::<RawRecordHeader>()));
+            assert_eq!(record.header.typ, [b'T', b'E', b'S', b'4']);
+            assert_eq!(addr_of!(record.header.data_size).read_unaligned(), 52);
+        }
         Ok(())
     }
 }

@@ -22,6 +22,7 @@ impl From<BindgenError> for Error {
 
 fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=wrapper.h");
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.hpp")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))

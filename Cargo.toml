@@ -1,2 +1,3 @@
 [workspace]
-members = ["bsatools"]
+members = ["esptools", "SymlinkHack", "CommonLibSSE-ng-sys"]
+default-members = ["esptools"]
