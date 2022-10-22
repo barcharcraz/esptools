@@ -3,3 +3,6 @@
 	url = https://github.com/CharmedBaryon/CommonLibSSE-NG.git
 	sparse-checkout = include
 	shallow = true
+[submodule "skse64-sys/skse64"]
+	path = skse64-sys/skse64
+	url = https://github.com/ianpatt/skse64.git
