@@ -1,0 +1,27 @@
+[package]
+name = "symlink_hack"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies.windows-sys]
+version = "*"
+features = [
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemInformation",
+    "Win32_UI_Shell",
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Memory"
+]
+
+[dependencies]
+skse64-sys = "*"
+log = { features = ["std"], version = "*" }

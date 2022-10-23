@@ -6,3 +6,6 @@
 [submodule "skse64-sys/skse64"]
 	path = skse64-sys/skse64
 	url = https://github.com/ianpatt/skse64.git
+[submodule "skse64-sys/common"]
+	path = skse64-sys/common
+	url = https://github.com/ianpatt/common.git

@@ -5,7 +5,7 @@ use bindgen::{BindgenError};
 
 
 fn main() {
-    println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rerun-if-changed=wrapper.hpp");
     let bindings = bindgen::Builder::default()
         .header("wrapper.hpp")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
@@ -13,7 +13,7 @@ fn main() {
         .allowlist_type("RE::BSArchiveHeader")
         .use_core()
         .rust_target(bindgen::RustTarget::Nightly)
-        .generate()?;
+        .generate().unwrap();
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    Ok(bindings.write_to_file(out_path.join("bindings.rs"))?)
+    bindings.write_to_file(out_path.join("bindings.rs")).unwrap();
 }

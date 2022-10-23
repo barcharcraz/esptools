@@ -1,7 +1,7 @@
 use std::{
     cmp::min,
     io::{self, BorrowedBuf, Read, Seek, SeekFrom},
-    mem::{MaybeUninit, size_of}, ffi::{CStr, CString},
+    mem::{MaybeUninit, size_of}, ffi::{CStr, CString}, borrow::Borrow, collections::{HashSet, BTreeSet}, hash::Hash,
 };
 
 use thiserror::Error;
@@ -113,7 +113,7 @@ impl<R: Read> ReadExtSkip for R {
 impl<R: Read + SeekPredicate> ReadExtSkip for R {
     fn skip_ext(&mut self, n: u64) -> io::Result<()> {
         println!("Buffered");
-        self.unconditionally_seek(SeekFrom::Current(n as i64))?;
+        self.seek(SeekFrom::Current(n as i64))?;
         Ok(())
     }
 }
