@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies.windows-sys]
+[dependencies.windows]
 version = "*"
 features = [
     "Win32_System_Diagnostics_Debug",
@@ -19,7 +19,9 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_SystemServices",
     "Win32_System_WindowsProgramming",
-    "Win32_System_Memory"
+    "Win32_System_Memory",
+    "Win32_Globalization",
+    "Win32_Security"
 ]
 
 [dependencies]

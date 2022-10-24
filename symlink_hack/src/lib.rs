@@ -2,43 +2,48 @@
 #![allow(non_snake_case)]
 #![feature(inline_const)]
 #![feature(const_maybe_uninit_zeroed)]
-
+#![feature(atomic_from_mut)]
 use log::*;
 use skse64_sys::*;
 use std::{
     collections::BTreeMap,
+    ffi::*,
     fmt::Debug,
     fs::File,
     io::{self, BufWriter, Write},
     mem::{transmute, zeroed, MaybeUninit},
-    os::windows::prelude::FromRawHandle,
+    os::windows::prelude::{FromRawHandle, OsStringExt},
     path::{Path, PathBuf},
     ptr::null,
-};
-
-use std::str;
-
-use std::{
-    ffi::*,
-    os::windows::prelude::OsStringExt,
-    sync::Mutex,
+    result::Result,
+    str,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     thread::{self, *},
     time::*,
 };
 
-use windows_sys::{
-    core::PCWSTR,
+use windows::{
+    core::{HRESULT, PCWSTR, PCSTR},
     Win32::{
         Foundation::*,
-        Storage::FileSystem::{FindFileHandle, FILE_ATTRIBUTE_REPARSE_POINT, WIN32_FIND_DATAA},
+        Globalization::{MultiByteToWideChar, CP_ACP, CP_MACCP},
+        Storage::FileSystem::{
+            CreateFileA, FindFileHandle, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
+            OPEN_EXISTING, WIN32_FIND_DATAA, FILE_ACCESS_FLAGS, FILE_SHARE_MODE, FILE_ATTRIBUTE_NORMAL, GetFileSize, FILE_READ_ATTRIBUTES, GetFileSizeEx,
+        },
         System::{
-            Memory::{VirtualProtect, PAGE_READWRITE},
+            Memory::{
+                VirtualProtect, VirtualProtectFromApp, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
+            },
             SystemServices::IO_REPARSE_TAG_SYMLINK,
         },
     },
 };
 
-use windows_sys::Win32::{
+use windows::Win32::{
     Storage::FileSystem::{FindFirstFileA, FindNextFileA},
     System::{
         Com::CoTaskMemFree,
@@ -78,29 +83,12 @@ const fn make_u32<const N: usize>(init: &[u32]) -> [u32; N] {
     result
 }
 
-unsafe fn wcslen(mut str: *const u16) -> usize {
-    let mut len: usize = 0;
-    while *str != 0 {
-        len += 1;
-        str = str.offset(1);
-    }
-    len
-}
-
-unsafe fn as_wide<'a>(str: *const u16) -> &'a [u16] {
-    std::slice::from_raw_parts(str, wcslen(str))
-}
-
 fn log_dir() -> Option<PathBuf> {
     let mut pbuf: PathBuf;
     unsafe {
-        let mut buf: *mut u16 = 0 as _;
-        let res = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, 0, &mut buf);
-        if res != S_OK {
-            return None;
-        }
-        pbuf = OsString::from_wide(as_wide(buf)).into();
-        CoTaskMemFree(buf as _);
+        let mut buf = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None).ok()?;
+        pbuf = OsString::from_wide(buf.as_wide()).into();
+        CoTaskMemFree(Some(buf.as_ptr() as _));
     }
     pbuf.push("My Games/Skyrim Special Edition/SKSE");
     Some(pbuf)
@@ -158,38 +146,38 @@ impl<T> CastOffset for *const T {
 }
 
 fn image_base() -> *const u8 {
-    unsafe { GetModuleHandleW(null()) as _ }
+    unsafe { GetModuleHandleW(None).unwrap().0 as _ }
 }
 struct SavedPtrs {
     FindFirstFileA: unsafe extern "system" fn(*const u8, *mut WIN32_FIND_DATAA) -> FindFileHandle,
     FindNextFileA: unsafe extern "system" fn(FindFileHandle, *mut WIN32_FIND_DATAA) -> BOOL,
+    FindClose: unsafe extern "system" fn(FindFileHandle) -> BOOL,
 }
 
-impl Debug for SavedPtrs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SavedPtrs")
-            .field("FindFirstFileA", &(self.FindFirstFileA as *const u8))
-            .field("FindNextFileA", &(self.FindNextFileA as *const u8))
-            .finish()
+#[repr(transparent)]
+#[derive(Eq, PartialEq)]
+struct FindFileHandleOrd(FindFileHandle);
+impl PartialOrd for FindFileHandleOrd {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0 .0.partial_cmp(&other.0 .0)
+    }
+}
+
+impl Ord for FindFileHandleOrd {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0 .0.cmp(&other.0 .0)
+    }
+}
+
+impl From<FindFileHandle> for FindFileHandleOrd {
+    fn from(value: FindFileHandle) -> Self {
+        Self(value)
     }
 }
 
 static mut savedPtrs: MaybeUninit<SavedPtrs> = MaybeUninit::uninit();
-static mut findFileInfo: MaybeUninit<Mutex<BTreeMap<FindFileHandle, CString>>> =
+static mut findFileInfo: MaybeUninit<Mutex<BTreeMap<FindFileHandleOrd, Box<[u8]>>>> =
     MaybeUninit::uninit();
-
-fn init_globals() {
-    unsafe {
-        // note: the full qualification is quite important here since the "windows" crate has
-        // functions at the same relative paths that import the "real" function internally, if we got the address
-        // of one of those we would have a bad time, as it would go and call our hooked function!
-        savedPtrs.write(SavedPtrs {
-            FindFirstFileA: ::windows_sys::Win32::Storage::FileSystem::FindFirstFileA,
-            FindNextFileA: ::windows_sys::Win32::Storage::FileSystem::FindNextFileA,
-        });
-        findFileInfo.write(Mutex::new(BTreeMap::<FindFileHandle, CString>::new()));
-    }
-}
 
 unsafe extern "system" fn myFindFirstFileA(
     filename: *const u8,
@@ -198,15 +186,16 @@ unsafe extern "system" fn myFindFirstFileA(
     let ptrs = savedPtrs.assume_init_ref();
 
     let ffh = (ptrs.FindFirstFileA)(filename, findFileData);
-    info!(
-        "File: {:?}",
-        CStr::from_ptr((*findFileData).cFileName.as_ptr() as _)
-    );
     {
         let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
         let fname_cstr = CStr::from_ptr(filename as _);
-        info!("FindFirstFile: {:?}", fname_cstr);
-        inf.insert(ffh, CStr::from_ptr(filename as _).to_owned());
+        let fname_directory_part: &[u8] = fname_cstr
+            .to_bytes()
+            .rsplitn(2, |c| *c == b'\\' || *c == b'/')
+            .nth(1)
+            .unwrap();
+        // we know there isn't a nul byte, but we still need to copy over anyway
+        inf.insert(ffh.into(), Box::from(fname_directory_part));
     }
     ffh
 }
@@ -218,75 +207,135 @@ unsafe extern "system" fn myFindNextFileA(
     let ptrs = savedPtrs.assume_init_ref();
     let res = (ptrs.FindNextFileA)(handle, findFileData);
     {
-        let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
-        info!("NextFile in folder: {:?}", inf[&handle]);
-        if (*findFileData).dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-            && (*findFileData).dwReserved0 == IO_REPARSE_TAG_SYMLINK
-        {
-            info!("Found symlink");
+        let inf = findFileInfo.assume_init_ref().lock().unwrap();
+        if let Some(dir) = inf.get(&handle.into()) {
+            let file = CStr::from_ptr((*findFileData).cFileName.as_ptr() as _);
+            let flags = FILE_FLAGS_AND_ATTRIBUTES((*findFileData).dwFileAttributes);
+            if flags & FILE_ATTRIBUTE_REPARSE_POINT == FILE_ATTRIBUTE_REPARSE_POINT
+                && (*findFileData).dwReserved0 == IO_REPARSE_TAG_SYMLINK
+            {
+                info!("Found symlink");
+                let file = file.to_bytes();
+                let mut symlink_path = Vec::<u8>::with_capacity(dir.len() + 2 + file.len());
+                symlink_path.append(&mut dir.clone().into_vec());
+                symlink_path.push(b'\\');
+                symlink_path.append(&mut file.to_owned());
+                let lpfilename = CString::from_vec_unchecked(symlink_path);
+                info!("Getting size of: {:?}", lpfilename);
+                let handle = CreateFileA(
+                    PCSTR::from_raw(lpfilename.as_ptr() as _),
+                    FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_MODE(0),
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None,
+                );
+                if let Err(err) = handle {
+                    error!("Failed to open file: {:?}, error {:?}", lpfilename, err);
+                    return res;
+                }
+                let handle = handle.unwrap();
+                let mut fileSize: i64 = 0;
+                let result = GetFileSizeEx(handle, &mut fileSize);
+                if !result.as_bool() {
+                    error!("Could not get file size for {:?}", lpfilename);
+                }
+                (*findFileData).nFileSizeLow = fileSize as u32;
+                (*findFileData).nFileSizeHigh = (fileSize >> 32) as u32;
+            }
         }
     }
     res
 }
 
-fn do_hook(module: &str, fns: &[&mut *const u8], names: &[&str]) {
-    unsafe {
-        let handle = image_base();
-        info!("Module Handle: {:?}", handle);
-        let dosHeader: *const IMAGE_DOS_HEADER = handle as _;
-        info!("DOS Header {:?}", dosHeader);
-        let peHeader: *const IMAGE_NT_HEADERS64 =
-            dosHeader.byte_offset_cast((*dosHeader).e_lfanew as isize);
-        let impDirectory: IMAGE_DATA_DIRECTORY =
-            (*peHeader).OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT as usize];
-        let mut impDescriptor: *const IMAGE_IMPORT_DESCRIPTOR =
-            dosHeader.byte_offset_cast(impDirectory.VirtualAddress as isize);
-        info!("{:?}", (*impDescriptor).Name);
-        while (*impDescriptor).Name != 0 {
-            let libname =
-                CStr::from_ptr(dosHeader.byte_offset_cast((*impDescriptor).Name as isize));
+unsafe extern "system" fn myFindClose(handle: FindFileHandle) -> BOOL {
+    let ptrs = savedPtrs.assume_init_ref();
+    let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
+    inf.remove(&handle.into());
+    (ptrs.FindClose)(handle)
+}
 
-            info!("Libname: {:?}", libname);
-            if libname.to_bytes() == module.as_bytes() {
-                info!("Found Target descriptor: {}", module);
-                let mut oft: *const IMAGE_THUNK_DATA64 =
-                    handle.offset((*impDescriptor).Anonymous.OriginalFirstThunk as _) as _;
-                let mut ft: *const IMAGE_THUNK_DATA64 =
-                    handle.offset((*impDescriptor).FirstThunk as _) as _;
-                while (*oft).u1.AddressOfData != 0 {
-                    if (*oft).u1.AddressOfData & (1 << usize::BITS - 1) != 0 {
-                        info!("Found Import by ordinal: {}", (*oft).u1.AddressOfData);
-                    }
-
-                    let fn_name: *const IMAGE_IMPORT_BY_NAME =
-                        handle.offset((*oft).u1.AddressOfData as _) as _;
-                    let fn_name = CStr::from_ptr((*fn_name).Name.as_ptr() as _);
-                    info!("Found FN: {:?}", fn_name);
-                    if fn_name.to_bytes() == b"FindFirstFileA"  {
-                        info!("Hooking FindFirstFileA");
-                        let mut oldProtect: u32 = 0;
-                        let ft = ft.cast_mut();
-                        let res = VirtualProtect(ft as _, 8, PAGE_READWRITE, &mut oldProtect);
-                        if res == 0 {
-                            info!("Hooking FindFirstFileA failed VirtualProtect");
-                            return;
-                        }
-                        (*ft).u1.Function = myFindFirstFileA as _;
-                        let res = VirtualProtect(ft as _, 8, oldProtect, &mut oldProtect);
-                        if res == 0 {
-                            info!("Resetting protection flags failed for FindFirstFileA");
-                            return;
-                        }
-                        return;
-                    }
+#[derive(Debug)]
+enum HookError {
+    VirtualProtectFailed(windows::core::Error),
+    FunctionNotFound,
+    ModuleNotFound,
+}
+unsafe fn hook_iat_function(
+    module: &[u8],
+    function_name: &[u8],
+    new_function: usize,
+) -> Result<usize, HookError> {
+    let handle = image_base();
+    let dosHeader: *const IMAGE_DOS_HEADER = handle as _;
+    let peHeader: *const IMAGE_NT_HEADERS64 =
+        dosHeader.byte_offset_cast((*dosHeader).e_lfanew as isize);
+    let impDirectory: IMAGE_DATA_DIRECTORY =
+        (*peHeader).OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT.0 as usize];
+    let mut impDescriptor: *const IMAGE_IMPORT_DESCRIPTOR =
+        dosHeader.byte_offset_cast(impDirectory.VirtualAddress as isize);
+    info!("{:?}", (*impDescriptor).Name);
+    while (*impDescriptor).Name != 0 {
+        let libname = CStr::from_ptr(dosHeader.byte_offset_cast((*impDescriptor).Name as isize));
+        if libname.to_bytes() == module {
+            let mut oft: *const IMAGE_THUNK_DATA64 =
+                handle.offset((*impDescriptor).Anonymous.OriginalFirstThunk as _) as _;
+            let mut ft: *const IMAGE_THUNK_DATA64 =
+                handle.offset((*impDescriptor).FirstThunk as _) as _;
+            while (*oft).u1.AddressOfData != 0 {
+                if (*oft).u1.AddressOfData & (1 << usize::BITS - 1) != 0 {
+                    info!("Found Import by ordinal: {}", (*oft).u1.AddressOfData);
                     oft = oft.offset(1);
                     ft = ft.offset(1);
+                    continue;
                 }
-                return;
+
+                let fn_name: *const IMAGE_IMPORT_BY_NAME =
+                    handle.offset((*oft).u1.AddressOfData as _) as _;
+                let fn_name = CStr::from_ptr((*fn_name).Name.as_ptr() as _);
+                if fn_name.to_bytes() == function_name {
+                    let mut oldProtect = PAGE_PROTECTION_FLAGS::default();
+                    let ft = ft.cast_mut();
+                    let res = VirtualProtect(ft as _, 8, PAGE_READWRITE, &mut oldProtect);
+                    res.ok().map_err(|e| HookError::VirtualProtectFailed(e))?;
+                    let oldFunction = AtomicU64::from_mut(&mut (*ft).u1.Function)
+                        .swap(new_function as _, Ordering::SeqCst);
+                    // possible race
+                    let res = VirtualProtect(ft as _, 8, oldProtect, &mut oldProtect);
+                    res.ok().map_err(|e| HookError::VirtualProtectFailed(e))?;
+                    return Ok(oldFunction as _);
+                }
+                oft = oft.offset(1);
+                ft = ft.offset(1);
             }
-            impDescriptor = impDescriptor.offset(1)
+            return Err(HookError::FunctionNotFound);
         }
-        info!("failed to find targeted library")
+        impDescriptor = impDescriptor.offset(1)
+    }
+    Err(HookError::ModuleNotFound)
+}
+
+fn init_hooks() {
+    unsafe {
+        savedPtrs.write(SavedPtrs {
+            FindFirstFileA: transmute(
+                hook_iat_function(b"KERNEL32.dll", b"FindFirstFileA", myFindFirstFileA as _)
+                    .unwrap(),
+            ),
+            FindNextFileA: transmute(
+                hook_iat_function(b"KERNEL32.dll", b"FindNextFileA", myFindNextFileA as _).unwrap(),
+            ),
+            FindClose: transmute(
+                hook_iat_function(b"KERNEL32.dll", b"FindClose", myFindClose as _).unwrap(),
+            ),
+        });
+    }
+}
+
+fn init_globals() {
+    unsafe {
+        findFileInfo.write(Mutex::new(BTreeMap::<FindFileHandleOrd, Box<[u8]>>::new()));
     }
 }
 
@@ -310,7 +359,7 @@ pub extern "C" fn SKSEPlugin_Load(_skse: *const SKSEInterface) -> c_char {
         thread::current().id()
     );
     init_globals();
-    do_hook("KERNEL32.dll");
+    init_hooks();
     info!("testing");
 
     1
