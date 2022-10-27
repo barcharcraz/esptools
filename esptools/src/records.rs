@@ -1,4 +1,5 @@
-
+// SPDX-FileCopyrightText: Charles Barto
+// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only
 
 use std::mem::{size_of_val, size_of, transmute};
 use std::ptr::addr_of;

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: Charles Barto
+// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only
 #![feature(read_buf)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]

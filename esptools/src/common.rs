@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: Charles Barto
+// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only
 use std::{
     cmp::min,
     io::{self, BorrowedBuf, Read, Seek, SeekFrom},
