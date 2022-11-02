@@ -3,7 +3,7 @@ name = "esptools"
 authors = ["Charles Barto <barto.charlie@gmail.com>"]
 version = "0.1.0"
 edition = "2021"
-license = "GPL-2.0-only OR GPL-3.0-only"
+license = "LGPL-3.0-only"
 
 
 [dependencies]

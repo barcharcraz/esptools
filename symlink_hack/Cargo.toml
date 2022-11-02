@@ -2,6 +2,7 @@
 name = "symlink_hack"
 version = "0.1.0"
 edition = "2021"
+license = "LGPL-3.0-only"
 
 [lib]
 crate-type = ["cdylib"]
@@ -25,5 +26,6 @@ features = [
 ]
 
 [dependencies]
-skse64-sys = "*"
 log = { features = ["std"], version = "*" }
+bitflags = "*"
+num-traits = "*"

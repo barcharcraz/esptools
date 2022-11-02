@@ -1,2 +1,0 @@
-Universal Filesystem Overlay is licensed under the GNU General Public License,
-either version 2 or, at your option version 3.

@@ -1,5 +1,7 @@
 // SPDX-FileCopyrightText: Charles Barto
-// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only
+//
+// SPDX-License-Identifier: LGPL-3.0-only
+
 use std::{error, result};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::BorrowError;

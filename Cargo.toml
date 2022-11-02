@@ -1,6 +1,3 @@
 [workspace]
-members = ["esptools", "symlink_hack", "skse64-sys"]
+members = ["esptools", "symlink_hack"]
 default-members = ["esptools"]
-
-[patch.crates-io]
-skse64-sys = {path = "skse64-sys"}

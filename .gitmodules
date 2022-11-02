@@ -1,11 +1,1 @@
-[submodule "CommonLibSSE-ng-sys/CommonLibSSE-NG"]
-	path = CommonLibSSE-ng-sys/CommonLibSSE-NG
-	url = https://github.com/CharmedBaryon/CommonLibSSE-NG.git
-	sparse-checkout = include
-	shallow = true
-[submodule "skse64-sys/skse64"]
-	path = skse64-sys/skse64
-	url = https://github.com/ianpatt/skse64.git
-[submodule "skse64-sys/common"]
-	path = skse64-sys/common
-	url = https://github.com/ianpatt/common.git
+

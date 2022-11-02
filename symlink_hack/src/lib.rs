@@ -1,14 +1,22 @@
+// SPDX-FileCopyrightText: Charles Barto
+//
+// SPDX-License-Identifier: LGPL-3.0-only
+
 #![feature(pointer_byte_offsets)]
 #![allow(non_snake_case)]
+#![feature(core_intrinsics)]
 #![feature(inline_const)]
 #![feature(const_maybe_uninit_zeroed)]
 #![feature(atomic_from_mut)]
+
 use log::*;
-use skse64_sys::*;
+use num_traits::PrimInt;
+use bitflags::bitflags;
 use std::{
+    backtrace::Backtrace,
     collections::BTreeMap,
     ffi::*,
-    fmt::Debug,
+    fmt::{self, Debug, Write as FmtWrite},
     fs::File,
     io::{self, BufWriter, Write},
     mem::{transmute, zeroed, MaybeUninit},
@@ -26,13 +34,14 @@ use std::{
 };
 
 use windows::{
-    core::{HRESULT, PCWSTR, PCSTR},
+    core::{HRESULT, PCSTR, PCWSTR},
     Win32::{
         Foundation::*,
         Globalization::{MultiByteToWideChar, CP_ACP, CP_MACCP},
         Storage::FileSystem::{
-            CreateFileA, FindFileHandle, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
-            OPEN_EXISTING, WIN32_FIND_DATAA, FILE_ACCESS_FLAGS, FILE_SHARE_MODE, FILE_ATTRIBUTE_NORMAL, GetFileSize, FILE_READ_ATTRIBUTES, GetFileSizeEx,
+            CreateFileA, FindFileHandle, GetFileSize, GetFileSizeEx, FILE_ACCESS_FLAGS,
+            FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_MODE, OPEN_EXISTING, WIN32_FIND_DATAA,
         },
         System::{
             Memory::{
@@ -63,17 +72,16 @@ const fn make_exe_version(major: u8, minor: u8, build: u16) -> u32 {
         | (((build & 0xFFF) as u32) << 4)
 }
 
-const fn make_string<const N: usize>(name: &[u8]) -> [::core::ffi::c_char; N] {
-    let mut result: [c_char; N] = [0; N];
-    let mut i = 0;
-    while i < name.len() {
-        result[i] = name[i] as _;
+const fn make_u8array<const N: usize>(init: &[u8]) -> [u8; N] {
+    let mut result: [u8; N] = [0; N];
+    let mut i: usize = 0;
+    while i < init.len() {
+        result[i] = init[i];
         i += 1;
     }
     result
 }
-
-const fn make_u32<const N: usize>(init: &[u32]) -> [u32; N] {
+const fn make_u32array<const N: usize>(init: &[u32]) -> [u32; N] {
     let mut result: [u32; N] = [0; N];
     let mut i: usize = 0;
     while i < init.len() {
@@ -94,16 +102,40 @@ fn log_dir() -> Option<PathBuf> {
     Some(pbuf)
 }
 
+
+
+bitflags! {
+    struct PluginCompatibility: u32 {
+        const AddressLibraryPostAE = 1 << 0;
+        const Signatures = 1 << 1;
+        const StructsPost629 = 1 << 2;
+    }
+    struct PluginCompatibilityEx: u32 {
+        const NoStructUse = 1 << 0;
+    }
+}
+struct SKSEPluginVersionData {
+    dataVersion: u32,
+    pluginVersion: u32,
+    name: [u8; 256],
+    author: [u8; 256],
+    supportEmail: [u8; 252],
+    versionIndependenceEx: PluginCompatibilityEx,
+    versionIndependence: PluginCompatibility,
+    compatibleVersions: [u32; 16],
+    seVersionRequired: u32
+}
+
 #[no_mangle]
-pub static SKSEPlugin_Version: SKSEPluginVersionData = SKSEPluginVersionData {
-    dataVersion: SKSEPluginVersionData_kVersion as u32,
+static SKSEPlugin_Version: SKSEPluginVersionData = SKSEPluginVersionData {
+    dataVersion: 1,
     pluginVersion: 1,
-    name: make_string(b"symlink_hack"),
+    name: make_u8array(b"symlink_hack"),
     author: [0; 256],
-    supportEmail: [0i8; 252],
-    versionIndependenceEx: SKSEPluginVersionData_kVersionIndependentEx_NoStructUse as u32,
-    versionIndependence: SKSEPluginVersionData_kVersionIndependent_Signatures as u32,
-    compatibleVersions: make_u32(&[make_exe_version(1, 6, 640)]),
+    supportEmail: [0; 252],
+    versionIndependenceEx: PluginCompatibilityEx::NoStructUse,
+    versionIndependence: PluginCompatibility::Signatures,
+    compatibleVersions: make_u32array(&[make_exe_version(1, 6, 640)]),
     seVersionRequired: 0,
 };
 struct MyLogger {
@@ -179,6 +211,50 @@ static mut savedPtrs: MaybeUninit<SavedPtrs> = MaybeUninit::uninit();
 static mut findFileInfo: MaybeUninit<Mutex<BTreeMap<FindFileHandleOrd, Box<[u8]>>>> =
     MaybeUninit::uninit();
 
+fn maybe_correct_findFileData(dir: &[u8], findFileData: &mut WIN32_FIND_DATAA) {
+    let file = unsafe { CStr::from_ptr((*findFileData).cFileName.as_ptr() as _) };
+    let flags = FILE_FLAGS_AND_ATTRIBUTES((*findFileData).dwFileAttributes);
+    if flags & FILE_ATTRIBUTE_REPARSE_POINT == FILE_ATTRIBUTE_REPARSE_POINT
+        && (*findFileData).dwReserved0 == IO_REPARSE_TAG_SYMLINK
+    {
+        info!("Found symlink");
+        let file = file.to_bytes();
+        let mut symlink_path = Vec::<u8>::with_capacity(dir.len() + 2 + file.len());
+        symlink_path.append(&mut dir.to_vec());
+        symlink_path.push(b'\\');
+        symlink_path.append(&mut file.to_owned());
+        unsafe {
+            let lpfilename = CString::from_vec_unchecked(symlink_path);
+            info!("Getting size of: {:?}", lpfilename);
+
+            let handle = CreateFileA(
+                PCSTR::from_raw(lpfilename.as_ptr() as _),
+                FILE_READ_ATTRIBUTES,
+                FILE_SHARE_MODE(0),
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            );
+
+            if let Err(err) = handle {
+                error!("Failed to open file: {:?}, error {:?}", lpfilename, err);
+                return;
+            }
+
+            let handle = handle.unwrap();
+            let mut fileSize: i64 = 0;
+            let result = unsafe { GetFileSizeEx(handle, &mut fileSize) };
+            if !result.as_bool() {
+                error!("Could not get file size for {:?}", lpfilename);
+            }
+            (*findFileData).nFileSizeLow = fileSize as u32;
+            (*findFileData).nFileSizeHigh = (fileSize >> 32) as u32;
+            CloseHandle(handle);
+        }
+    }
+}
+
 unsafe extern "system" fn myFindFirstFileA(
     filename: *const u8,
     findFileData: *mut WIN32_FIND_DATAA,
@@ -189,13 +265,17 @@ unsafe extern "system" fn myFindFirstFileA(
     {
         let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
         let fname_cstr = CStr::from_ptr(filename as _);
-        let fname_directory_part: &[u8] = fname_cstr
+        info!("Adding directory {:?}", fname_cstr);
+        if let Some(fname_directory_part) = fname_cstr
             .to_bytes()
             .rsplitn(2, |c| *c == b'\\' || *c == b'/')
             .nth(1)
-            .unwrap();
-        // we know there isn't a nul byte, but we still need to copy over anyway
-        inf.insert(ffh.into(), Box::from(fname_directory_part));
+        {
+            // we know there isn't a nul byte, but we still need to copy over anyway
+            maybe_correct_findFileData(fname_directory_part, &mut *findFileData);
+
+            inf.insert(ffh.into(), Box::from(fname_directory_part));
+        }
     }
     ffh
 }
@@ -209,41 +289,7 @@ unsafe extern "system" fn myFindNextFileA(
     {
         let inf = findFileInfo.assume_init_ref().lock().unwrap();
         if let Some(dir) = inf.get(&handle.into()) {
-            let file = CStr::from_ptr((*findFileData).cFileName.as_ptr() as _);
-            let flags = FILE_FLAGS_AND_ATTRIBUTES((*findFileData).dwFileAttributes);
-            if flags & FILE_ATTRIBUTE_REPARSE_POINT == FILE_ATTRIBUTE_REPARSE_POINT
-                && (*findFileData).dwReserved0 == IO_REPARSE_TAG_SYMLINK
-            {
-                info!("Found symlink");
-                let file = file.to_bytes();
-                let mut symlink_path = Vec::<u8>::with_capacity(dir.len() + 2 + file.len());
-                symlink_path.append(&mut dir.clone().into_vec());
-                symlink_path.push(b'\\');
-                symlink_path.append(&mut file.to_owned());
-                let lpfilename = CString::from_vec_unchecked(symlink_path);
-                info!("Getting size of: {:?}", lpfilename);
-                let handle = CreateFileA(
-                    PCSTR::from_raw(lpfilename.as_ptr() as _),
-                    FILE_READ_ATTRIBUTES,
-                    FILE_SHARE_MODE(0),
-                    None,
-                    OPEN_EXISTING,
-                    FILE_ATTRIBUTE_NORMAL,
-                    None,
-                );
-                if let Err(err) = handle {
-                    error!("Failed to open file: {:?}, error {:?}", lpfilename, err);
-                    return res;
-                }
-                let handle = handle.unwrap();
-                let mut fileSize: i64 = 0;
-                let result = GetFileSizeEx(handle, &mut fileSize);
-                if !result.as_bool() {
-                    error!("Could not get file size for {:?}", lpfilename);
-                }
-                (*findFileData).nFileSizeLow = fileSize as u32;
-                (*findFileData).nFileSizeHigh = (fileSize >> 32) as u32;
-            }
+            maybe_correct_findFileData(dir, &mut *findFileData);
         }
     }
     res
@@ -339,8 +385,30 @@ fn init_globals() {
     }
 }
 
+#[repr(C)]
+struct SKSEInterface(pub(self)[u8; 0]);
+
 #[no_mangle]
-pub extern "C" fn SKSEPlugin_Load(_skse: *const SKSEInterface) -> c_char {
+extern "C" fn SKSEPlugin_Load(_skse: *const SKSEInterface) -> c_char {
+    std::panic::set_hook(Box::new(|info| {
+        let bt = Backtrace::force_capture();
+        let msg = info
+            .payload()
+            .downcast_ref::<&'static str>()
+            .unwrap_or(&"No Panic Message");
+        let mut message = String::new();
+        write!(
+            message,
+            "Panic, thread '{}' panicked at '{}'",
+            thread::current().name().unwrap_or("<unnamed>"),
+            msg
+        ).unwrap();
+        if let Some(loc) = info.location() {
+            write!(message, ": {}:{}", loc.file(), loc.line()).unwrap();
+        }
+        writeln!(message, "{:?}", bt).unwrap();
+        error!("{}", message);
+    }));
     let mut p = log_dir().unwrap();
 
     p.push("symlink_hack.txt");
