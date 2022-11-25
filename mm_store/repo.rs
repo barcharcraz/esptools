@@ -1,10 +1,7 @@
 use std::{
-    convert::Infallible,
-    fmt::{self, Display, Write as FmtWrite},
+    fmt::{self, Write as FmtWrite},
     io::{self, Write},
-    mem::variant_count,
     path::{Path, PathBuf},
-    str::FromStr, ffi::{OsStr, OsString},
     collections::BTreeMap
 };
 
@@ -153,7 +150,7 @@ impl Repo {
             return Err(RepoError::AlreadyExists);
         }
         let result = Repo { repo_dir };
-        let mut config_data = toml::to_string(&RepoConfig::default()).unwrap();
+        let config_data = toml::to_string(&RepoConfig::default()).unwrap();
         result
             .repo_dir
             .open_with("config", OpenOptions::new().write(true).create_new(true))?

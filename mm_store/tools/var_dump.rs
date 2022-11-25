@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 
-use byteorder::LE;
+
 use clap::{value_parser, Arg, Command};
 use mm_store::DirTree;
-use serde::{Serialize, Deserialize};
-use zvariant::{from_slice, from_slice_for_signature, EncodingContext, Signature, Value, Type};
+
+use zvariant::{from_slice, EncodingContext, Type};
 
 fn main() {
     let args = Command::new("var_dump")
