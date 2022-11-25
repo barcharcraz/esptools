@@ -1,14 +1,11 @@
 use std::{
-    ffi::{c_void, CStr},
-    ptr::{from_raw_parts, null, null_mut},
+    ffi::{c_void},
 };
 
-use widestring::u16cstr;
+
 use windows::{
-    core::PCWSTR,
     Win32::{
         Foundation::{BOOLEAN, HANDLE, NTSTATUS},
-        Storage::FileSystem::*,
         System::WindowsProgramming::IO_STATUS_BLOCK,
     },
 };

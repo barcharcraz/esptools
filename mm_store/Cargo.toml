@@ -1,7 +1,12 @@
 [package]
-name = "rust_ostree"
+name = "mm_store"
 version = "0.1.0"
 edition = "2021"
+
+[[bin]]
+name = "var_dump"
+path = "tools/var_dump.rs"
+
 
 [lib]
 path = "lib.rs"
@@ -20,3 +25,12 @@ features = [
 widestring = "*"
 cap-std = "*"
 thiserror = "*"
+serde = { version = "*", features = ["derive"] }
+toml = "*"
+serde_with = "*"
+zvariant = "*"
+strum = "*"
+strum_macros = "*"
+sha2 = "*"
+clap = "*"
+byteorder = "*"
