@@ -30,3 +30,9 @@ fn test_matches_hash_blank() -> io::Result<()> {
     
     Ok(())
 }
+
+
+// #[test]
+// fn test_matches_hash_file() -> io::Result<()> {
+
+// }

@@ -2,6 +2,8 @@
 #![feature(cstr_from_bytes_until_nul)]
 #![feature(variant_count)]
 #![feature(map_try_insert)]
+#![feature(new_uninit)]
+#![feature(read_buf)]
 mod xattr_util;
 pub mod repo;
 pub mod perms;

@@ -3,12 +3,12 @@ use std::{
     fmt::{self, Write as FmtWrite, Debug},
     io::{self, copy, ErrorKind, Write},
     path::{Path, PathBuf},
-    ptr::null_mut,
+    ptr::null_mut, ops::Deref, borrow::Borrow,
 };
-
+use crate::perms::{self, PermissionsExtExt};
 use byteorder::{BE, LE};
 use camino::Utf8Path;
-use cap_std::{ambient_authority, fs_utf8::*};
+use cap_std::{ambient_authority, fs_utf8::*, io_lifetimes::AsFilelike};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
@@ -19,6 +19,15 @@ use zvariant::{to_bytes, EncodingContext, Type, Value};
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default)]
 pub struct ChecksumVec(Vec<u8>);
+
+impl Deref for ChecksumVec {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl<T> AsRef<T> for ChecksumVec
     where 
         Vec<u8>: AsRef<T>,
@@ -28,6 +37,8 @@ impl<T> AsRef<T> for ChecksumVec
         self.0.as_ref()
     }
 }
+
+
 
 impl From<Vec<u8>> for ChecksumVec {
     fn from(value: Vec<u8>) -> Self {
@@ -196,11 +207,21 @@ pub struct FileHeader {
     pub xattrs: Vec<(Vec<u8>, Vec<u8>)>
 }
 
+fn canonical_mode(m: u32) -> u32 {
+    m & ( /* IFMT */ 0o170000 | 0o755)
+}
+
 impl FileHeader {
-    pub fn canonicalize_perms(&mut self) {
-        self.uid = 0;
-        self.gid = 0;
-        self.mode = self.mode & ( /* IFMT */ 0o170000 | 0o755)
+    pub fn cannonical_from_file(file: impl AsFilelike) -> io::Result<Self> {
+        let o = file.unixy_mode()?;
+        Ok(Self {
+            uid: 0,
+            gid: 0,
+            mode: canonical_mode(o),
+            rdev: 0,
+            symlink_target: Default::default(),
+            xattrs: Default::default()
+        })
     }
 }
 
@@ -242,8 +263,11 @@ impl MutableTree {
     pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
         fn hash_file(file: &mut File) -> io::Result<ChecksumVec> {
             let mut hasher = Sha256::new();
+            let ctx = EncodingContext::<BE>::new_gvariant(0);
+            let header = FileHeader::cannonical_from_file(&file)?;
+            println!("{:?}", header);
+            hasher.update(to_bytes(ctx, &header).unwrap());
             copy(file, &mut hasher)?;
-            hasher.update(&[0u8]);
             Ok(hasher.finalize().to_vec().into())
         }
         let mut result = Self::new();
