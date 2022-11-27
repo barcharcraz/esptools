@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Charles Barto
+//
+// SPDX-License-Identifier: LGPL-3.0-only
+
 use std::{
     collections::BTreeMap,
     fmt::{self, Write as FmtWrite, Debug},

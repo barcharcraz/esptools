@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Charles Barto
+//
+// SPDX-License-Identifier: LGPL-3.0-only
+
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{ambient_authority, fs_utf8::Dir};

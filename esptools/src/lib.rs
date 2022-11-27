@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Charles Barto
 //
 // SPDX-License-Identifier: LGPL-3.0-only
+
 #![feature(read_buf)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
