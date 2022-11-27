@@ -27,6 +27,6 @@ fn test_matches_hash_blank() -> io::Result<()> {
         hex::encode(t.contents_checksum),
         "a8ebaef3054ae4447749286d387f332a116876b49fac667c393989bcf00ae17a"
     );
-
+    
     Ok(())
 }

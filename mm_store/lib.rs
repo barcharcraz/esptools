@@ -4,4 +4,5 @@
 #![feature(map_try_insert)]
 mod xattr_util;
 pub mod repo;
+pub mod perms;
 pub use crate::repo::*;
