@@ -44,6 +44,7 @@ mod tests {
     use windows::{core::PCWSTR, Win32::{Storage::FileSystem::{CreateFile2, FILE_GENERIC_READ, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING}, System::WindowsProgramming::IO_STATUS_BLOCK}};
     use super::{NtQueryEaFile, FILE_FULL_EA_INFORMATION};
     #[test]
+    #[ignore]
     fn test_query_attrs() {
         unsafe {
             let f = CreateFile2(

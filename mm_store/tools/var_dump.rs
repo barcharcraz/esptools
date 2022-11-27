@@ -2,7 +2,7 @@ use std::path::{PathBuf};
 
 
 use clap::{value_parser, Arg, Command};
-use mm_store::DirTree;
+use mm_store::{DirTree, Commit};
 
 use zvariant::{from_slice, EncodingContext, Type};
 
@@ -12,8 +12,8 @@ fn main() {
         .get_matches();
     let content = std::fs::read(args.get_one::<PathBuf>("path").unwrap()).unwrap();
     println!("{:?}", content);
-    println!("{}", DirTree::signature());
-    let v: DirTree = from_slice(
+    println!("{}", Commit::signature());
+    let v: Commit = from_slice(
         content.as_slice(),
         EncodingContext::<byteorder::LE>::new_gvariant(0),
     ).unwrap();

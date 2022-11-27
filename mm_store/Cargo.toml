@@ -11,19 +11,20 @@ path = "tools/var_dump.rs"
 [lib]
 path = "lib.rs"
 
-[dependencies.windows]
+[target.'cfg(windows)'.dependencies.windows]
 version = "*"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_WindowsProgramming"
 ]
 
 [dependencies]
 widestring = "*"
-cap-std = "*"
+cap-std = { version = "*", features = ["fs_utf8"] }
 thiserror = "*"
 serde = { version = "*", features = ["derive"] }
 toml = "*"
@@ -31,6 +32,9 @@ serde_with = "*"
 zvariant = "*"
 strum = "*"
 strum_macros = "*"
+digest = "*"
+camino = "*"
 sha2 = "*"
 clap = "*"
 byteorder = "*"
+hex = "*"
