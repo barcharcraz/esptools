@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use std::{error, result};
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::BorrowError;
 
-use std::cmp::min;
-use std::ffi::{CStr, CString, FromBytesWithNulError};
+
+
+
+
+use std::ffi::{CString, FromBytesWithNulError};
 use std::fmt::Debug;
-use std::io::{self, BorrowedBuf, BufReader, Read, Seek, SeekFrom};
-use std::mem::{MaybeUninit, size_of, transmute};
+use std::io::{self, BorrowedBuf, Read};
+use std::mem::{MaybeUninit, transmute};
 
 use bitflags::bitflags;
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
@@ -113,10 +113,10 @@ impl ParseBsa for ArchiveHeader {
 
 #[test]
 fn test_archive_reader() {
-	use std::{fs::File, path::Path};
+	use std::{fs::File, path::Path, io::{SeekFrom, Seek}};
 	let test1_p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/test1.bsa");
 	let mut test1_f = File::open(test1_p).unwrap();
-	let mut reader = ArchiveHeader::parse(&mut test1_f).unwrap();
+	let reader = ArchiveHeader::parse(&mut test1_f).unwrap();
 
 	println!("{:#x?}", reader);
 	let folder = FolderRecord::parse_given(&mut test1_f, &reader).unwrap();
@@ -130,7 +130,7 @@ fn test_archive_reader() {
 
 	let file = FileRecord::parse_given(&mut test1_f, &reader).unwrap();
 	println!("{:x?}", file);
-	test1_f.seek(SeekFrom::Start(0));
+	test1_f.seek(SeekFrom::Start(0)).unwrap();
 	test1_f.skip(file.offset as u64).unwrap();
 
 	let file_data = (&test1_f).parse_bytes(file.size as usize);
@@ -143,7 +143,7 @@ pub trait SizedRecord {
 }
 
 impl<T: ConstantSizedRecord> SizedRecord for T {
-	fn size(ver: ArchiveVersion) -> usize {
+	fn size(_ver: ArchiveVersion) -> usize {
 		Self::SIZE
 	}
 }

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
 use std::mem::{size_of_val, size_of, transmute};
-use std::ptr::addr_of;
+
 
 use crate::common::ConstantSizedRecord;
 
@@ -111,6 +111,7 @@ mod tests {
     use std::fs::File;
     use std::env;
     use std::mem::{size_of};
+    use std::ptr::addr_of;
     use super::*;
     use memmap2::Mmap;
     #[test]

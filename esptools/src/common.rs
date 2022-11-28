@@ -5,7 +5,7 @@
 use std::{
     cmp::min,
     io::{self, BorrowedBuf, Read, Seek, SeekFrom},
-    mem::{MaybeUninit, size_of}, ffi::{CStr, CString}, borrow::Borrow, collections::{HashSet, BTreeSet}, hash::Hash,
+    mem::{MaybeUninit, size_of}, ffi::{CStr, CString},
 };
 
 use thiserror::Error;
