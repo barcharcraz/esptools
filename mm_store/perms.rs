@@ -171,7 +171,7 @@ pub mod win32 {
     }
 
     impl<T: AsHandle> PermissionsExtExt for T {
-        fn unixy_permissions(&self) -> io::Result<u32> {
+        fn unixy_permissions(self) -> io::Result<u32> {
             Ok(get_unixy_mode(self)?)
         }
     }
