@@ -9,6 +9,7 @@
 #![feature(new_uninit)]
 #![feature(read_buf)]
 
+#[cfg(windows)]
 mod xattr_util;
 pub mod repo;
 pub mod perms;

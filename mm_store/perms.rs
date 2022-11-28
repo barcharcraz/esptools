@@ -6,12 +6,21 @@ use std::io;
 
 pub trait PermissionsExtExt {
     /// should never return anything except the first 9 bits
-    fn unixy_permissions(&self) -> io::Result<u32>;
+    fn unixy_permissions(self) -> io::Result<u32>;
 }
 #[cfg(unix)]
 pub mod unix {
+    use cap_std::io_lifetimes::AsFilelike;
+
+    use super::PermissionsExtExt;
+    use std::{io, os::unix::io::{AsFd, OwnedFd}, fs::File};
+    use std::os::unix::fs::{MetadataExt, FileExt};
     impl<T: AsFd> PermissionsExtExt for T {
-        fn owner(&self) -> UnixyPermissions {}
+        fn unixy_permissions(self) -> io::Result<u32> {
+            let file = self.as_filelike_view::<File>();
+            let mode = file.metadata()?.mode();
+            Ok(mode & 0o777)
+        }
     }
 }
 
