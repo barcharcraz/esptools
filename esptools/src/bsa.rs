@@ -293,12 +293,9 @@ pub struct IndexedFile {
 	pub data_size: u64,
 
 }
-pub struct IndexedArchive {
-	header: ArchiveHeader,
-	file_hashes: Vec<u64>,
-	file_names: Vec<CString>,
-	folders: Vec<IndexedFolder>,
-
-
-
-}
+// pub struct IndexedArchive {
+// 	header: ArchiveHeader,
+// 	file_hashes: Vec<u64>,
+// 	file_names: Vec<CString>,
+// 	folders: Vec<IndexedFolder>,
+// }

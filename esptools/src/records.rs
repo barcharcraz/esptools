@@ -121,10 +121,10 @@ mod tests {
         let file = File::open(empty)?;
         let mmap = unsafe { Mmap::map(&file)? };
         unsafe {
-            let recHdr = &*(mmap.as_ptr() as *const RawRecordHeader);
-            assert_eq!(recHdr.typ, [b'T', b'E', b'S', b'4']);
-            assert_eq!(addr_of!(recHdr.data_size).read_unaligned(), 52);
-            let record = transmute::<(&RawRecordHeader, usize), &Record>((recHdr, recHdr.data_size as usize + size_of::<RawRecordHeader>()));
+            let rec_hdr = &*(mmap.as_ptr() as *const RawRecordHeader);
+            assert_eq!(rec_hdr.typ, [b'T', b'E', b'S', b'4']);
+            assert_eq!(addr_of!(rec_hdr.data_size).read_unaligned(), 52);
+            let record = transmute::<(&RawRecordHeader, usize), &Record>((rec_hdr, rec_hdr.data_size as usize + size_of::<RawRecordHeader>()));
             assert_eq!(record.header.typ, [b'T', b'E', b'S', b'4']);
             assert_eq!(addr_of!(record.header.data_size).read_unaligned(), 52);
         }
