@@ -2,19 +2,17 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use crate::perms::{PermissionsExtExt};
-use byteorder::{BE};
-use camino::Utf8Path;
-use cap_std::{ambient_authority, fs_utf8::*, io_lifetimes::AsFilelike};
+use crate::perms::PermissionsExtExt;
+use byteorder::BE;
+use camino::{Utf8Path, Utf8PathBuf};
+use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug},
-    io::{self, copy, Write},
-    path::{PathBuf},
-    ptr::null_mut
+    io::{self, copy, ErrorKind, Write}, ffi::OsString,
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
@@ -24,8 +22,9 @@ use zvariant::{to_bytes, EncodingContext, Type, Value};
 #[derive(Serialize, Deserialize, Type, Default)]
 pub struct Checksum(pub(self) Box<[u8]>);
 
-impl<T> From<T> for Checksum 
-    where Box<[u8]>: From<T>
+impl<T> From<T> for Checksum
+where
+    Box<[u8]>: From<T>,
 {
     fn from(value: T) -> Self {
         Self(Box::from(value))
@@ -87,7 +86,8 @@ fn test_repo_mode() {
     assert_eq!(RepoMode::BareSplitXattrs.to_string(), "bare-split-xattrs")
 }
 
-pub fn loose_path(checksum: &str, typ: ObjectType, mode: RepoMode) -> PathBuf {
+pub fn loose_path(checksum: &Checksum, typ: ObjectType, mode: RepoMode) -> Utf8PathBuf {
+    let checksum = hex::encode(checksum);
     [
         &checksum[0..2],
         &checksum[2..],
@@ -190,7 +190,6 @@ pub struct FileHeader {
     // must be zero
     pub rdev: u32,
     pub symlink_target: String,
-    #[zvariant(signature = "a{ayay}")]
     pub xattrs: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
@@ -236,8 +235,6 @@ fn test_sigs_match_borrowed() {
     assert_eq!(DirTreeFile::signature(), DirTreeFileRef::signature());
     assert_eq!(DirTreeDir::signature(), DirTreeDirRef::signature());
     assert_eq!(DirTree::signature(), DirTreeRef::signature());
-
-
 }
 
 pub enum MutableTreeType {
@@ -247,11 +244,10 @@ pub enum MutableTreeType {
 
 #[derive(Debug)]
 pub struct MutableTree {
-    parent: *mut MutableTree,
     pub contents_checksum: Checksum,
     pub metadata_checksum: Checksum,
-    pub files: BTreeMap<String, Checksum>,
-    pub dirs: BTreeMap<String, MutableTree>,
+    files: BTreeMap<String, Checksum>,
+    dirs: BTreeMap<String, MutableTree>,
 }
 
 pub fn hash_file(file: &mut File) -> io::Result<Checksum> {
@@ -274,18 +270,17 @@ impl MutableTree {
     fn new() -> Self {
         let ctx = EncodingContext::<BE>::new_gvariant(0);
         Self {
-            parent: null_mut(),
-            contents_checksum: Default::default(),
-            metadata_checksum: Sha256::digest(to_bytes(ctx, &DirMeta::default()).unwrap())
-                .to_vec()
-                .into(),
             files: Default::default(),
             dirs: Default::default(),
+            contents_checksum: Checksum::default(),
+            metadata_checksum: Sha256::digest(
+                to_bytes(EncodingContext::<BE>::new_gvariant(0), &DirMeta::default()).unwrap(),
+            )
+            .as_slice()
+            .into(),
         }
     }
     pub fn insert_child(&mut self, name: String, mut child: MutableTree) {
-        assert!(child.parent == null_mut());
-        child.parent = self;
         self.dirs.insert(name, child);
     }
     pub fn get_dirtree(&self) -> DirTree {
@@ -334,17 +329,24 @@ impl MutableTree {
 
     pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
         let mut result = Self::new();
+        fn handle_inval(o: OsString) -> io::Error {
+            io::Error::new(ErrorKind::InvalidData, o.to_string_lossy())
+        }
         for ent in dir.entries()?.flatten() {
             if ent.file_type()?.is_dir() {
                 // TODO: NFC
                 result.insert_child(
-                    ent.file_name()?,
+                    ent.file_name()
+                        .into_string()
+                        .map_err(handle_inval)?,
                     Self::new_recursive_blank(ent.open_dir()?)?,
                 );
             } else {
-                result
-                    .files
-                    .insert(ent.file_name()?, hash_file(&mut ent.open()?)?);
+                result.files.insert(
+                    ent.file_name()
+                        .into_string().map_err(handle_inval)?,
+                    hash_file(&mut ent.open()?)?,
+                );
             }
         }
         let ctx = EncodingContext::<BE>::new_gvariant(0);
@@ -364,6 +366,8 @@ impl Default for MutableTree {
 
 pub struct Repo {
     repo_dir: Dir,
+    objects_dir: Dir,
+    mode: RepoMode,
 }
 
 #[derive(Error, Debug)]
@@ -410,16 +414,25 @@ impl Repo {
         if repo_dir.is_dir("objects") {
             return Err(RepoError::AlreadyExists);
         }
-        let result = Repo { repo_dir };
+
         let config_data = toml::to_string(&RepoConfig::default()).unwrap();
-        result
-            .repo_dir
+
+        repo_dir
             .open_with("config", OpenOptions::new().write(true).create_new(true))?
             .write_all(config_data.as_ref())?;
         for dir_path in Self::STATE_DIRS {
-            result.repo_dir.create_dir(dir_path)?;
+            repo_dir.create_dir(dir_path)?;
         }
+        let result = Repo {
+            objects_dir: repo_dir.open_dir("objects")?,
+            repo_dir,
+            mode: RepoMode::BareUserOnly,
+        };
         Ok(result)
     }
-
+    pub fn has_object(&self, typ: ObjectType, chk: &Checksum) -> io::Result<bool> {
+        self.objects_dir.try_exists(loose_path(chk, typ, self.mode))
+    }
+    
+    pub fn write_dfd_to_mtree(&mut self, dfd: Dir, mtree: &mut MutableTree) {}
 }

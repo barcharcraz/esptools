@@ -4,7 +4,7 @@
 
 use byteorder::BE;
 use camino::{Utf8PathBuf};
-use cap_std::{ambient_authority, fs_utf8::Dir};
+use cap_std::{ambient_authority, fs::Dir};
 use mm_store::*;
 use std::{io};
 use zvariant::{EncodingContext};
