@@ -11,7 +11,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fmt::{self, Debug, Write as FmtWrite},
+    fmt::{self, Debug},
     io::{self, copy, Write},
     path::{PathBuf},
     ptr::null_mut,
