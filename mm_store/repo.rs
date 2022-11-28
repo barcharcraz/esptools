@@ -2,20 +2,18 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use crate::perms::{self, PermissionsExtExt};
-use byteorder::{BE, LE};
+use crate::perms::{PermissionsExtExt};
+use byteorder::{BE};
 use camino::Utf8Path;
 use cap_std::{ambient_authority, fs_utf8::*, io_lifetimes::AsFilelike};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
-    borrow::Borrow,
     collections::BTreeMap,
     fmt::{self, Debug, Write as FmtWrite},
-    io::{self, copy, ErrorKind, Write},
-    ops::Deref,
-    path::{Path, PathBuf},
+    io::{self, copy, Write},
+    path::{PathBuf},
     ptr::null_mut,
 };
 use strum_macros::{Display, EnumString};

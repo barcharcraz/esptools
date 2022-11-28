@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use cap_std::fs::File;
 use std::io;
 
 pub trait PermissionsExtExt {
@@ -18,16 +17,13 @@ pub mod unix {
 
 #[cfg(windows)]
 pub mod win32 {
-    use cap_std::{
-        fs::File,
-        io_lifetimes::{views::*, AsFilelike},
-    };
+
     use std::{
         default::Default,
-        io::{self, BorrowedBuf, ErrorKind},
-        mem::{transmute, MaybeUninit},
+        io::{self},
+        mem::transmute,
         os::windows::io::{AsHandle, AsRawHandle},
-        ptr::{addr_of, null_mut},
+        ptr::null_mut,
     };
     use windows::Win32::{
         Foundation::{HANDLE, PSID},
@@ -158,13 +154,7 @@ pub mod win32 {
             let group = unix_perms(info.group, info.dacl)?;
             let mut buf = Box::<[u8]>::new_uninit_slice(100);
             let mut sz = 100;
-            CreateWellKnownSid(
-                WinWorldSid,
-                None,
-                transmute(buf.as_mut_ptr()),
-                &mut sz,
-            )
-            .ok()?;
+            CreateWellKnownSid(WinWorldSid, None, transmute(buf.as_mut_ptr()), &mut sz).ok()?;
             let everyone_sid = PSID(buf.as_mut_ptr().cast());
             let everyone = unix_perms(everyone_sid, info.dacl)?;
             Ok(everyone + (group << 3) + (owner << 6))
@@ -179,15 +169,11 @@ pub mod win32 {
 
     #[test]
     fn test_w32_owner_perms() {
-        use std::{
-            fs::{File, OpenOptions},
-            path::PathBuf,
-        };
+        use std::{fs::File, path::PathBuf};
         let datapath: PathBuf = [env!("CARGO_MANIFEST_DIR"), "testdata"]
             .into_iter()
             .collect();
         let test_f = |p: &str, perm: u8| {
-
             let mode = get_unixy_mode(File::open(datapath.join(p)).unwrap()).unwrap();
             assert_eq!(((mode & 0o700) >> 6) as u8, perm);
         };

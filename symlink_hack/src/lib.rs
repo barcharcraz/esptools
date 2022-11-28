@@ -207,8 +207,8 @@ impl From<FindFileHandle> for FindFileHandleOrd {
     }
 }
 
-static mut savedPtrs: MaybeUninit<SavedPtrs> = MaybeUninit::uninit();
-static mut findFileInfo: MaybeUninit<Mutex<BTreeMap<FindFileHandleOrd, Box<[u8]>>>> =
+static mut SAVED_PTRS: MaybeUninit<SavedPtrs> = MaybeUninit::uninit();
+static mut FIND_FILE_INFO: MaybeUninit<Mutex<BTreeMap<FindFileHandleOrd, Box<[u8]>>>> =
     MaybeUninit::uninit();
 
 fn maybe_correct_findFileData(dir: &[u8], findFileData: &mut WIN32_FIND_DATAA) {
@@ -259,11 +259,11 @@ unsafe extern "system" fn myFindFirstFileA(
     filename: *const u8,
     findFileData: *mut WIN32_FIND_DATAA,
 ) -> FindFileHandle {
-    let ptrs = savedPtrs.assume_init_ref();
+    let ptrs = SAVED_PTRS.assume_init_ref();
 
     let ffh = (ptrs.FindFirstFileA)(filename, findFileData);
     {
-        let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
+        let mut inf = FIND_FILE_INFO.assume_init_ref().lock().unwrap();
         let fname_cstr = CStr::from_ptr(filename as _);
         info!("Adding directory {:?}", fname_cstr);
         if let Some(fname_directory_part) = fname_cstr
@@ -284,10 +284,10 @@ unsafe extern "system" fn myFindNextFileA(
     handle: FindFileHandle,
     findFileData: *mut WIN32_FIND_DATAA,
 ) -> BOOL {
-    let ptrs = savedPtrs.assume_init_ref();
+    let ptrs = SAVED_PTRS.assume_init_ref();
     let res = (ptrs.FindNextFileA)(handle, findFileData);
     {
-        let inf = findFileInfo.assume_init_ref().lock().unwrap();
+        let inf = FIND_FILE_INFO.assume_init_ref().lock().unwrap();
         if let Some(dir) = inf.get(&handle.into()) {
             maybe_correct_findFileData(dir, &mut *findFileData);
         }
@@ -296,8 +296,8 @@ unsafe extern "system" fn myFindNextFileA(
 }
 
 unsafe extern "system" fn myFindClose(handle: FindFileHandle) -> BOOL {
-    let ptrs = savedPtrs.assume_init_ref();
-    let mut inf = findFileInfo.assume_init_ref().lock().unwrap();
+    let ptrs = SAVED_PTRS.assume_init_ref();
+    let mut inf = FIND_FILE_INFO.assume_init_ref().lock().unwrap();
     inf.remove(&handle.into());
     (ptrs.FindClose)(handle)
 }
@@ -364,7 +364,7 @@ unsafe fn hook_iat_function(
 
 fn init_hooks() {
     unsafe {
-        savedPtrs.write(SavedPtrs {
+        SAVED_PTRS.write(SavedPtrs {
             FindFirstFileA: transmute(
                 hook_iat_function(b"KERNEL32.dll", b"FindFirstFileA", myFindFirstFileA as _)
                     .unwrap(),
@@ -381,7 +381,7 @@ fn init_hooks() {
 
 fn init_globals() {
     unsafe {
-        findFileInfo.write(Mutex::new(BTreeMap::<FindFileHandleOrd, Box<[u8]>>::new()));
+        FIND_FILE_INFO.write(Mutex::new(BTreeMap::<FindFileHandleOrd, Box<[u8]>>::new()));
     }
 }
 
