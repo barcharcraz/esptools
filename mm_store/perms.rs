@@ -6,7 +6,8 @@ use cap_std::fs::File;
 use std::io;
 
 pub trait PermissionsExtExt {
-    fn unixy_mode(&self) -> io::Result<u32>;
+    /// should never return anything except the first 9 bits
+    fn unixy_permissions(&self) -> io::Result<u32>;
 }
 #[cfg(unix)]
 pub mod unix {
@@ -171,7 +172,7 @@ pub mod win32 {
     }
 
     impl<T: AsHandle> PermissionsExtExt for T {
-        fn unixy_mode(&self) -> io::Result<u32> {
+        fn unixy_permissions(&self) -> io::Result<u32> {
             Ok(get_unixy_mode(self)?)
         }
     }
@@ -188,7 +189,6 @@ pub mod win32 {
         let test_f = |p: &str, perm: u8| {
 
             let mode = get_unixy_mode(File::open(datapath.join(p)).unwrap()).unwrap();
-            println!("{:o}", mode);
             assert_eq!(((mode & 0o700) >> 6) as u8, perm);
         };
         test_f("testpermsro", 4);

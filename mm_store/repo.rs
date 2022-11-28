@@ -2,13 +2,6 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Write as FmtWrite, Debug},
-    io::{self, copy, ErrorKind, Write},
-    path::{Path, PathBuf},
-    ptr::null_mut, ops::Deref, borrow::Borrow,
-};
 use crate::perms::{self, PermissionsExtExt};
 use byteorder::{BE, LE};
 use camino::Utf8Path;
@@ -16,47 +9,38 @@ use cap_std::{ambient_authority, fs_utf8::*, io_lifetimes::AsFilelike};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    fmt::{self, Debug, Write as FmtWrite},
+    io::{self, copy, ErrorKind, Write},
+    ops::Deref,
+    path::{Path, PathBuf},
+    ptr::null_mut,
+};
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use zvariant::{to_bytes, EncodingContext, Type, Value};
 
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default)]
-pub struct ChecksumVec(Vec<u8>);
+pub struct Checksum(pub(self) Box<[u8]>);
 
-impl Deref for ChecksumVec {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl<T> From<T> for Checksum 
+    where Box<[u8]>: From<T>
+{
+    fn from(value: T) -> Self {
+        Self(Box::from(value))
     }
 }
 
-impl<T> AsRef<T> for ChecksumVec
-    where 
-        Vec<u8>: AsRef<T>,
-        T: ?Sized
-{
-    fn as_ref(&self) -> &T {
+impl AsRef<[u8]> for Checksum {
+    fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-
-
-impl From<Vec<u8>> for ChecksumVec {
-    fn from(value: Vec<u8>) -> Self {
-        Self(value)
-    }
-}
-
-// impl AsRef<[u8]> for ChecksumVec {
-//     fn as_ref(&self) -> &[u8] {
-//         &self.0
-//     }
-// }
-
-impl Debug for ChecksumVec {
+impl Debug for Checksum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&hex::encode(&self.0))
     }
@@ -96,6 +80,7 @@ pub enum RepoMode {
     ArchiveZ2,
     BareSplitXattrs,
 }
+
 #[test]
 fn test_repo_mode() {
     assert_eq!(RepoMode::Bare.to_string(), "bare");
@@ -120,19 +105,19 @@ pub fn loose_path(checksum: &str, typ: ObjectType, mode: RepoMode) -> PathBuf {
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct RelatedObject {
     pub name: String,
-    pub checksum: Vec<u8>,
+    pub checksum: Checksum,
 }
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct Commit<'a> {
     #[serde(borrow)]
     pub metadata: BTreeMap<String, Value<'a>>,
-    pub parent: Vec<u8>,
+    pub parent: Checksum,
     pub related_objects: Vec<RelatedObject>,
     pub subject: String,
     pub body: String,
     pub timestamp: u64,
-    pub root_dirtree_checksum: Vec<u8>,
-    pub root_dirmeta_checksum: Vec<u8>,
+    pub root_dirtree_checksum: Checksum,
+    pub root_dirmeta_checksum: Checksum,
 }
 
 #[derive(Debug, Serialize, Deserialize, Type)]
@@ -160,7 +145,7 @@ pub struct DirTreeFile {
     // note: filenames are NFC UTF-8
     // TODO: maybe store filenames using PEP-383 style surrogate escapes
     pub name: String,
-    pub checksum: ChecksumVec,
+    pub checksum: Checksum,
 }
 
 #[derive(Serialize, Deserialize, Debug, Type)]
@@ -168,16 +153,12 @@ struct DirTreeFileRef<'a> {
     name: &'a str,
     checksum: &'a [u8],
 }
-#[test]
-fn test_dir_tree_file_ref_match() {
-    assert_eq!(DirTreeFile::signature(), DirTreeFileRef::signature());
-}
 
 #[derive(Serialize, Deserialize, Debug, Type)]
 pub struct DirTreeDir {
     pub name: String,
-    pub checksum: Vec<u8>,
-    pub meta_checksum: Vec<u8>,
+    pub checksum: Box<[u8]>,
+    pub meta_checksum: Box<[u8]>,
 }
 #[derive(Serialize, Deserialize, Debug, Type)]
 struct DirTreeDirRef<'a> {
@@ -186,15 +167,18 @@ struct DirTreeDirRef<'a> {
     meta_checksum: &'a [u8],
 }
 
-#[test]
-fn test_dir_tree_dir_ref_match() {
-    assert_eq!(DirTreeDir::signature(), DirTreeDirRef::signature());
-}
-
 #[derive(Serialize, Deserialize, Debug, Type)]
 pub struct DirTree {
     pub files: Vec<DirTreeFile>,
     pub dirs: Vec<DirTreeDir>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Type)]
+pub struct DirTreeRef<'a> {
+    #[serde(borrow)]
+    files: Vec<DirTreeFileRef<'a>>,
+    #[serde(borrow)]
+    dirs: Vec<DirTreeDirRef<'a>>,
 }
 
 /// This is the file header in archive-z2 mode, and also the "synthetic" file
@@ -208,23 +192,37 @@ pub struct FileHeader {
     // must be zero
     pub rdev: u32,
     pub symlink_target: String,
-    pub xattrs: Vec<(Vec<u8>, Vec<u8>)>
+    #[zvariant(signature = "a{ayay}")]
+    pub xattrs: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 fn canonical_mode(m: u32) -> u32 {
-    m & ( /* IFMT */ 0o170000 | 0o755)
+    m & (/* IFMT */0o170000 | 0o755)
+}
+
+impl Default for FileHeader {
+    fn default() -> Self {
+        Self {
+            uid: 0,
+            gid: 0,
+            mode: 0o100644,
+            rdev: 0,
+            symlink_target: Default::default(),
+            xattrs: Default::default(),
+        }
+    }
 }
 
 impl FileHeader {
     pub fn cannonical_from_file(file: impl AsFilelike) -> io::Result<Self> {
-        let o = file.unixy_mode()?;
+        let o = file.unixy_permissions()?;
         Ok(Self {
             uid: 0,
             gid: 0,
             mode: canonical_mode(o),
             rdev: 0,
             symlink_target: Default::default(),
-            xattrs: Default::default()
+            xattrs: Default::default(),
         })
     }
 }
@@ -235,6 +233,15 @@ fn test_sigs_match_upstream() {
     assert_eq!(FileHeader::signature(), "(uuuusa(ayay))");
 }
 
+#[test]
+fn test_sigs_match_borrowed() {
+    assert_eq!(DirTreeFile::signature(), DirTreeFileRef::signature());
+    assert_eq!(DirTreeDir::signature(), DirTreeDirRef::signature());
+    assert_eq!(DirTree::signature(), DirTreeRef::signature());
+
+
+}
+
 pub enum MutableTreeType {
     Lazy,
     Whole,
@@ -243,10 +250,26 @@ pub enum MutableTreeType {
 #[derive(Debug)]
 pub struct MutableTree {
     parent: *mut MutableTree,
-    pub contents_checksum: ChecksumVec,
-    pub metadata_checksum: ChecksumVec,
-    pub files: BTreeMap<String, ChecksumVec>,
+    pub contents_checksum: Checksum,
+    pub metadata_checksum: Checksum,
+    pub files: BTreeMap<String, Checksum>,
     pub dirs: BTreeMap<String, MutableTree>,
+}
+
+pub fn hash_file(file: &mut File) -> io::Result<Checksum> {
+    let mut hasher = Sha256::new();
+    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    let header = FileHeader::default();
+    let header_data = to_bytes(ctx, &header).unwrap();
+    let header_data_size = header_data.len();
+    assert!(header_data_size < u32::MAX as usize);
+    let header_size_pfx: [u8; 4] = (header_data_size as u32).to_be_bytes();
+    hasher.update(header_size_pfx);
+    // alignment
+    hasher.update([0u8; 4]);
+    hasher.update(header_data);
+    copy(file, &mut hasher)?;
+    Ok(hasher.finalize().to_vec().into())
 }
 
 impl MutableTree {
@@ -255,7 +278,10 @@ impl MutableTree {
         Self {
             parent: null_mut(),
             contents_checksum: Default::default(),
-            metadata_checksum: Sha256::digest(to_bytes(ctx, &DirMeta::default()).unwrap()).to_vec().into(),            files: Default::default(),
+            metadata_checksum: Sha256::digest(to_bytes(ctx, &DirMeta::default()).unwrap())
+                .to_vec()
+                .into(),
+            files: Default::default(),
             dirs: Default::default(),
         }
     }
@@ -264,16 +290,51 @@ impl MutableTree {
         child.parent = self;
         self.dirs.insert(name, child);
     }
-    pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
-        fn hash_file(file: &mut File) -> io::Result<ChecksumVec> {
-            let mut hasher = Sha256::new();
-            let ctx = EncodingContext::<BE>::new_gvariant(0);
-            let header = FileHeader::cannonical_from_file(&file)?;
-            println!("{:?}", header);
-            hasher.update(to_bytes(ctx, &header).unwrap());
-            copy(file, &mut hasher)?;
-            Ok(hasher.finalize().to_vec().into())
+    pub fn get_dirtree(&self) -> DirTree {
+        DirTree {
+            files: self
+                .files
+                .iter()
+                .map(|(name, checksum)| DirTreeFile {
+                    name: name.clone(),
+                    checksum: checksum.0.clone().into(),
+                })
+                .collect(),
+            dirs: self
+                .dirs
+                .iter()
+                .map(|(name, mtree)| DirTreeDir {
+                    name: name.clone(),
+                    checksum: mtree.contents_checksum.0.clone(),
+                    meta_checksum: mtree.metadata_checksum.0.clone(),
+                })
+                .collect(),
         }
+    }
+
+    pub fn as_dirtree<'a>(&'a self) -> DirTreeRef<'a> {
+        DirTreeRef {
+            files: self
+                .files
+                .iter()
+                .map(|(name, checksum)| DirTreeFileRef {
+                    name: name.as_ref(),
+                    checksum: &checksum.0,
+                })
+                .collect(),
+            dirs: self
+                .dirs
+                .iter()
+                .map(|(name, mtree)| DirTreeDirRef {
+                    name: name.as_ref(),
+                    checksum: &mtree.contents_checksum.0,
+                    meta_checksum: &mtree.metadata_checksum.0,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
         let mut result = Self::new();
         for ent in dir.entries()?.flatten() {
             if ent.file_type()?.is_dir() {
@@ -290,32 +351,8 @@ impl MutableTree {
         }
         let ctx = EncodingContext::<BE>::new_gvariant(0);
         let mut hasher = Sha256::new();
-        for (k, v) in result.files.iter() {
-            // it should be structurally impossible for this error to happen
-            hasher.update(
-                to_bytes(
-                    ctx,
-                    &DirTreeFileRef {
-                        name: k,
-                        checksum: v.as_ref(),
-                    },
-                )
-                .unwrap(),
-            );
-        }
-        for (k, v) in result.dirs.iter() {
-            hasher.update(
-                to_bytes(
-                    ctx,
-                    &DirTreeDirRef {
-                        name: k,
-                        checksum: v.contents_checksum.as_ref(),
-                        meta_checksum: v.metadata_checksum.as_ref(),
-                    },
-                )
-                .unwrap(),
-            );
-        }
+        let dt = result.as_dirtree();
+        hasher.update(to_bytes(ctx, &dt).unwrap());
         result.contents_checksum = hasher.finalize().to_vec().into();
         Ok(result)
     }
@@ -386,4 +423,5 @@ impl Repo {
         }
         Ok(result)
     }
+
 }
