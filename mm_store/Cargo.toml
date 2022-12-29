@@ -4,14 +4,6 @@ version = "0.1.0"
 edition = "2021"
 license = "LGPL-3.0-only"
 
-[[bin]]
-name = "var_dump"
-path = "tools/var_dump.rs"
-
-
-[lib]
-path = "lib.rs"
-
 [target.'cfg(windows)'.dependencies.windows]
 version = "*"
 features = [

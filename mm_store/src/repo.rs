@@ -6,17 +6,19 @@ use crate::perms::PermissionsExtExt;
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
-use serde::{Deserialize, Serialize};
+use serde::{de, de::Visitor, Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
+    ffi::OsString,
     fmt::{self, Debug},
-    io::{self, copy, ErrorKind, Write}, ffi::OsString,
+    io::{self, copy, ErrorKind, Read, Write},
+    ptr::NonNull,
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
-use zvariant::{to_bytes, EncodingContext, Type, Value};
+use zvariant::{from_slice, gvariant, to_bytes, DynamicType, EncodingContext, Type, Value};
 
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default)]
@@ -43,6 +45,33 @@ impl Debug for Checksum {
     }
 }
 
+fn to_bytes_gv(value: &(impl Serialize + Type)) -> Vec<u8> {
+    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    // any errors should be impossible, we use str to enforce utf-8, and it's a precondition violation
+    // to get bogus types
+    to_bytes(ctx, value).unwrap()
+}
+
+fn from_slice_gv<'de, 'r: 'de, T: Deserialize<'de> + Type>(slice: &'r [u8]) -> zvariant::Result<T> {
+    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    from_slice(slice, ctx)
+}
+
+fn gv_hash(value: &(impl Serialize + Type)) -> Checksum {
+    Sha256::digest(to_bytes_gv(value))
+        .to_vec()
+        .into_boxed_slice()
+        .into()
+}
+fn gv_hash_and_val(value: &(impl Serialize + Type)) -> (Checksum, Vec<u8>) {
+    let data = to_bytes_gv(value);
+    let chk = Sha256::digest(data.as_slice())
+        .to_vec()
+        .into_boxed_slice()
+        .into();
+    (chk, data)
+}
+
 #[derive(Debug, Display, PartialEq, Clone, Copy)]
 #[strum(serialize_all = "kebab-case")]
 pub enum ObjectType {
@@ -67,7 +96,9 @@ impl ObjectType {
     }
 }
 
-#[derive(Debug, Display, SerializeDisplay, EnumString, DeserializeFromStr, Copy, Clone)]
+#[derive(
+    Debug, Display, SerializeDisplay, EnumString, DeserializeFromStr, Copy, Clone, PartialEq,
+)]
 #[repr(u32)]
 #[strum(serialize_all = "kebab-case")]
 pub enum RepoMode {
@@ -139,44 +170,17 @@ impl Default for DirMeta {
 }
 
 #[derive(Serialize, Deserialize, Debug, Type)]
-pub struct DirTreeFile {
-    // note: filenames are NFC UTF-8
-    // TODO: maybe store filenames using PEP-383 style surrogate escapes
-    pub name: String,
+#[zvariant(signature = "ayay")]
+pub struct DirTreeChecksums {
     pub checksum: Checksum,
+    pub meta_checksum: Checksum,
 }
 
 #[derive(Serialize, Deserialize, Debug, Type)]
-struct DirTreeFileRef<'a> {
-    name: &'a str,
-    checksum: &'a [u8],
-}
-
-#[derive(Serialize, Deserialize, Debug, Type)]
-pub struct DirTreeDir {
-    pub name: String,
-    pub checksum: Box<[u8]>,
-    pub meta_checksum: Box<[u8]>,
-}
-#[derive(Serialize, Deserialize, Debug, Type)]
-struct DirTreeDirRef<'a> {
-    name: &'a str,
-    checksum: &'a [u8],
-    meta_checksum: &'a [u8],
-}
-
-#[derive(Serialize, Deserialize, Debug, Type)]
+#[zvariant(signature = "(a(say)a(sayay))")]
 pub struct DirTree {
-    pub files: Vec<DirTreeFile>,
-    pub dirs: Vec<DirTreeDir>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Type)]
-pub struct DirTreeRef<'a> {
-    #[serde(borrow)]
-    files: Vec<DirTreeFileRef<'a>>,
-    #[serde(borrow)]
-    dirs: Vec<DirTreeDirRef<'a>>,
+    pub files: BTreeMap<String, Checksum>,
+    pub dirs: BTreeMap<String, DirTreeChecksums>,
 }
 
 /// This is the file header in archive-z2 mode, and also the "synthetic" file
@@ -228,26 +232,75 @@ impl FileHeader {
 fn test_sigs_match_upstream() {
     assert_eq!(DirMeta::signature(), "(uuua(ayay))");
     assert_eq!(FileHeader::signature(), "(uuuusa(ayay))");
-}
-
-#[test]
-fn test_sigs_match_borrowed() {
-    assert_eq!(DirTreeFile::signature(), DirTreeFileRef::signature());
-    assert_eq!(DirTreeDir::signature(), DirTreeDirRef::signature());
-    assert_eq!(DirTree::signature(), DirTreeRef::signature());
-}
-
-pub enum MutableTreeType {
-    Lazy,
-    Whole,
+    assert_eq!(DirTree::signature(), "(a(say)a(sayay))");
 }
 
 #[derive(Debug)]
-pub struct MutableTree {
-    pub contents_checksum: Checksum,
-    pub metadata_checksum: Checksum,
-    files: BTreeMap<String, Checksum>,
-    dirs: BTreeMap<String, MutableTree>,
+enum MutableTree<'repo> {
+    Lazy {
+        checksums: DirTreeChecksums,
+        repo: &'repo Repo,
+    },
+    Whole {
+        files: BTreeMap<String, Checksum>,
+        subdirs: BTreeMap<String, MutableTree<'repo>>,
+    },
+}
+
+impl<'repo> MutableTree<'repo> {
+    pub fn new() -> Self {
+        Self::Whole {
+            files: BTreeMap::new(),
+            subdirs: BTreeMap::new(),
+        }
+    }
+
+    pub fn from_dirtree_chk(repo: &'repo Repo, dtree: DirTree) -> Self {
+        Self::Whole {
+            files: dtree.files,
+            subdirs: dtree
+                .dirs
+                .into_iter()
+                .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
+                .collect(),
+        }
+    }
+
+    pub fn new_lazy_from_repo(repo: &'repo Repo, chk: DirTreeChecksums) -> Self {
+        Self::Lazy {
+            checksums: chk,
+            repo: repo,
+        }
+    }
+
+    pub fn make_whole(&mut self) -> Result<(), RepoError> {
+        use MutableTree::*;
+        match self {
+            Whole => Ok(()),
+            Lazy {checksums, repo } => {
+                let dirtree = repo.load_dirtree(&checksums.checksum)?;
+                *self = Whole {
+                    files: dirtree.files,
+                    subdirs: dirtree
+                        .dirs
+                        .into_iter()
+                        .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
+                        .collect(),
+                };
+                Ok(())
+            }
+        }
+    }
+    pub fn ensure_dir(&mut self, dir_name: &str) -> Result<&mut MutableTree, RepoError> {
+        self.make_whole()?;
+
+    }
+}
+
+impl Default for MutableTree<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub fn hash_file(file: &mut File) -> io::Result<Checksum> {
@@ -266,104 +319,44 @@ pub fn hash_file(file: &mut File) -> io::Result<Checksum> {
     Ok(hasher.finalize().to_vec().into())
 }
 
-impl MutableTree {
-    fn new() -> Self {
-        let ctx = EncodingContext::<BE>::new_gvariant(0);
+impl DirTreeChecksums {
+    pub fn new(tree: &DirTree, meta: &DirMeta) -> Self {
         Self {
-            files: Default::default(),
-            dirs: Default::default(),
-            contents_checksum: Checksum::default(),
-            metadata_checksum: Sha256::digest(
-                to_bytes(EncodingContext::<BE>::new_gvariant(0), &DirMeta::default()).unwrap(),
-            )
-            .as_slice()
-            .into(),
+            checksum: gv_hash(tree),
+            meta_checksum: gv_hash(meta),
         }
-    }
-    pub fn insert_child(&mut self, name: String, mut child: MutableTree) {
-        self.dirs.insert(name, child);
-    }
-    pub fn get_dirtree(&self) -> DirTree {
-        DirTree {
-            files: self
-                .files
-                .iter()
-                .map(|(name, checksum)| DirTreeFile {
-                    name: name.clone(),
-                    checksum: checksum.0.clone().into(),
-                })
-                .collect(),
-            dirs: self
-                .dirs
-                .iter()
-                .map(|(name, mtree)| DirTreeDir {
-                    name: name.clone(),
-                    checksum: mtree.contents_checksum.0.clone(),
-                    meta_checksum: mtree.metadata_checksum.0.clone(),
-                })
-                .collect(),
-        }
-    }
-
-    pub fn as_dirtree<'a>(&'a self) -> DirTreeRef<'a> {
-        DirTreeRef {
-            files: self
-                .files
-                .iter()
-                .map(|(name, checksum)| DirTreeFileRef {
-                    name: name.as_ref(),
-                    checksum: &checksum.0,
-                })
-                .collect(),
-            dirs: self
-                .dirs
-                .iter()
-                .map(|(name, mtree)| DirTreeDirRef {
-                    name: name.as_ref(),
-                    checksum: &mtree.contents_checksum.0,
-                    meta_checksum: &mtree.metadata_checksum.0,
-                })
-                .collect(),
-        }
-    }
-
-    pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
-        let mut result = Self::new();
-        fn handle_inval(o: OsString) -> io::Error {
-            io::Error::new(ErrorKind::InvalidData, o.to_string_lossy())
-        }
-        for ent in dir.entries()?.flatten() {
-            if ent.file_type()?.is_dir() {
-                // TODO: NFC
-                result.insert_child(
-                    ent.file_name()
-                        .into_string()
-                        .map_err(handle_inval)?,
-                    Self::new_recursive_blank(ent.open_dir()?)?,
-                );
-            } else {
-                result.files.insert(
-                    ent.file_name()
-                        .into_string().map_err(handle_inval)?,
-                    hash_file(&mut ent.open()?)?,
-                );
-            }
-        }
-        let ctx = EncodingContext::<BE>::new_gvariant(0);
-        let mut hasher = Sha256::new();
-        let dt = result.as_dirtree();
-        hasher.update(to_bytes(ctx, &dt).unwrap());
-        result.contents_checksum = hasher.finalize().to_vec().into();
-        Ok(result)
     }
 }
 
-impl Default for MutableTree {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+//     pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
+//         let mut result = Self::new();
+//         fn handle_inval(o: OsString) -> io::Error {
+//             io::Error::new(ErrorKind::InvalidData, o.to_string_lossy())
+//         }
+//         for ent in dir.entries()?.flatten() {
+//             if ent.file_type()?.is_dir() {
+//                 // TODO: NFC
+//                 result.insert_child(
+//                     ent.file_name().into_string().map_err(handle_inval)?,
+//                     Self::new_recursive_blank(ent.open_dir()?)?,
+//                 );
+//             } else {
+//                 result.files.insert(
+//                     ent.file_name().into_string().map_err(handle_inval)?,
+//                     hash_file(&mut ent.open()?)?,
+//                 );
+//             }
+//         }
+//         let ctx = EncodingContext::<BE>::new_gvariant(0);
+//         let mut hasher = Sha256::new();
+//         let dt = result.as_dirtree();
+//         hasher.update(to_bytes(ctx, &dt).unwrap());
+//         result.contents_checksum = hasher.finalize().to_vec().into();
+//         Ok(result)
+//     }
+// }
 
+#[derive(Debug)]
 pub struct Repo {
     repo_dir: Dir,
     objects_dir: Dir,
@@ -374,8 +367,12 @@ pub struct Repo {
 pub enum RepoError {
     #[error("Repo already exists.")]
     AlreadyExists,
+    #[error("Invalid mutable tree")]
+    InvalidMtree,
     #[error("Repo is malformed.")]
     MalformedRepo,
+    #[error("variant error")]
+    Variant(#[from] zvariant::Error),
     #[error("IO Error")]
     Io(#[from] io::Error),
     #[error("Format error")]
@@ -430,9 +427,54 @@ impl Repo {
         };
         Ok(result)
     }
-    pub fn has_object(&self, typ: ObjectType, chk: &Checksum) -> io::Result<bool> {
+    fn has_object(&self, typ: ObjectType, chk: &Checksum) -> io::Result<bool> {
         self.objects_dir.try_exists(loose_path(chk, typ, self.mode))
     }
-    
+
+    pub fn object_fd(&self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
+        if self.mode != RepoMode::BareUserOnly {
+            unimplemented!()
+        }
+        let p = loose_path(chk, typ, self.mode);
+        self.objects_dir.open(p)
+    }
+
+    /// get a fd for a new object, if the object already exists you get an error with ErrorKind::AlreadyExists
+    pub fn new_object_fd_mut(&mut self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
+        if self.mode != RepoMode::BareUserOnly {
+            unimplemented!()
+        }
+        let p = loose_path(chk, typ, self.mode);
+        self.objects_dir
+            .open_with(p, OpenOptions::new().create_new(true).write(true))
+    }
+
+    pub fn load_dirtree(&self, chk: &Checksum) -> Result<DirTree, RepoError> {
+        if self.mode != RepoMode::BareUserOnly {
+            unimplemented!()
+        }
+
+        let mut bytes = Vec::new();
+        self.object_fd(ObjectType::DirTree, chk)?
+            .read_to_end(&mut bytes)?;
+        Ok(from_slice_gv::<DirTree>(&bytes)?)
+    }
+
+    pub fn write_content(&mut self, mut file: impl Read) -> io::Result<Checksum> {
+        let mut hasher = Sha256::new();
+        copy(&mut file, &mut hasher)?;
+        let chk = hasher.finalize().to_vec().into_boxed_slice().into();
+        let mut fd = self.new_object_fd_mut(ObjectType::File, &chk)?;
+        copy(&mut file, &mut fd)?;
+        Ok(chk)
+    }
+
+    pub fn write_dirmeta(&mut self, meta: &DirMeta) -> io::Result<Checksum> {
+        let (chk, val) = gv_hash_and_val(meta);
+        let mut fd = self.new_object_fd_mut(ObjectType::DirMeta, &chk)?;
+        fd.write_all(&val)?;
+        Ok(chk)
+    }
+
     pub fn write_dfd_to_mtree(&mut self, dfd: Dir, mtree: &mut MutableTree) {}
 }
