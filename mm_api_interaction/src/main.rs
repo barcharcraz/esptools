@@ -1,8 +1,8 @@
 use serde_derive::{Serialize, Deserialize};
-use std::{env::current_exe, fs, io, thread::current};
-use tokio_tungstenite::connect_async;
-use url::Url;
-use uuid::Uuid;
+use std::{env::current_exe, fs, io};
+
+
+
 
 #[derive(Serialize, Deserialize)]
 struct Settings {
@@ -16,6 +16,6 @@ fn main() -> io::Result<()> {
             .ok_or(io::ErrorKind::NotFound)?
             .join("config.toml"),
     )?;
-    let conf: Settings = toml::from_str(&toml_str)?;
+    let _conf: Settings = toml::from_str(&toml_str)?;
     Ok(())
 }
