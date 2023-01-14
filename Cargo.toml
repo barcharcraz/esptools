@@ -1,3 +1,3 @@
 [workspace]
-members = ["esptools", "symlink_hack", "mm_store"]
+members = ["esptools", "symlink_hack", "mm_store", "mm_api_interaction"]
 default-members = ["esptools"]
