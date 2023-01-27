@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Charles Barto
+//
+// SPDX-License-Identifier: LGPL-3.0-only
+
 use serde_derive::{Serialize, Deserialize};
 use std::{env::current_exe, fs, io};
 
