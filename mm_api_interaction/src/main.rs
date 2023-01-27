@@ -8,7 +8,7 @@ use std::{env::current_exe, fs, io};
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Settings {
     pub api_key: String,
 }
@@ -20,6 +20,7 @@ fn main() -> io::Result<()> {
             .ok_or(io::ErrorKind::NotFound)?
             .join("config.toml"),
     )?;
-    let _conf: Settings = toml::from_str(&toml_str)?;
+    let _conf: Settings = toml::from_str(&toml_str).unwrap();
+    println!("{:?}", _conf);
     Ok(())
 }

@@ -1,5 +1,5 @@
 use std::{str::FromStr, collections::HashMap, hash::Hash, backtrace::Backtrace};
-
+use reqwest::{Request, Method};
 // SPDX-FileCopyrightText: Charles Barto
 //
 // SPDX-License-Identifier: LGPL-3.0-only
@@ -36,11 +36,8 @@ impl TryFrom<Url> for NXMUrl {
                 key: query_map.get("key").cloned(),
                 expires: query_map.get("expires")?.parse::<u64>().ok(),
                 user_id: query_map.get("user_id")?.parse::<u64>().ok(),
-                view: {
-                    let view = query_map.get("view").as_deref();
-                }
-                    query_map.get("view").as_deref().(|view|{
-                    view == "true" || view.parse::<u64>().ok()? > 0
+                view: query_map.get("view").as_deref().and_then(|view|{
+                    Some(view == "true" || view.parse::<u64>().ok()? > 0)
                 }),
                 extra_params: query_map,
             })
@@ -65,6 +62,21 @@ impl FromStr for NXMUrl {
     }
 }
 
+pub fn download_link_request(nxm: &NXMUrl) -> Request {
+    let mut url = Url::parse(format!("https://api.nexusmods.com/v1/games/{}/mods/{}/files/{}/download_link.json", nxm.game_id, nxm.mod_id, nxm.file_id).as_str()).unwrap();
+    let mut qp = url.query_pairs_mut();
+    if let Some(expires) = nxm.expires {
+	qp.append_pair("expires", expires.to_string().as_str());
+    }
+    if let Some(ref key) = nxm.key {
+	qp.append_pair("key", key);
+    }
+    Request::new(Method::GET, url)
+}
+
+
+pub enum DownloadLinkError {
+}
 #[test]
 fn test_nxm_from_url() {
     let nxm = NXMUrl::from_str(r"nxm://skyrimspecialedition/mods/80974/files/348116?key=qfKo3dvGjWwdHZJGuJcFxQ&expires=1673851268&user_id=123456").unwrap();
@@ -74,4 +86,7 @@ fn test_nxm_from_url() {
     assert_eq!(nxm.key.as_deref(), Some("qfKo3dvGjWwdHZJGuJcFxQ"));
     assert_eq!(nxm.expires, Some(1673851268));
     assert_eq!(nxm.user_id, Some(123456));
+
+    let req = download_link_request(&nxm);
+    println!("{:?}", req);
 }
