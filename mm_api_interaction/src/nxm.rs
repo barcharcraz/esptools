@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use std::{backtrace::Backtrace, collections::HashMap, hash::Hash, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
 use url::Url;
 pub struct NXMUrl {
