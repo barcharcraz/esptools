@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
 use clap::{Args, Parser, Subcommand};
+use enum_dispatch::enum_dispatch;
 use log::{info, log};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,6 +15,13 @@ use std::{
     stringify
 };
 use strum::{EnumDiscriminants, EnumString, IntoStaticStr};
+use mm_api_interaction::api::sync::download_link;
+use mm_api_interaction::nxm::NXMUrl;
+
+#[enum_dispatch(mm_cli_subcommands)]
+trait MmCliCommand {
+    fn run(self) -> io::Result<()>;
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -23,13 +31,36 @@ struct mm_cli {
 }
 
 #[derive(Subcommand)]
+#[enum_dispatch]
 enum mm_cli_subcommands {
     Api(api_cli),
     Config(config_cli),
 }
 
 #[derive(Args)]
-struct api_cli {}
+struct api_cli {
+    #[command(subcommand)]
+    command: api_cli_commands
+}
+
+#[derive(Subcommand)]
+enum api_cli_commands {
+    DownloadLink {nxmurl: String}
+}
+
+impl MmCliCommand for api_cli {
+    fn run(self) -> io::Result<()> {
+        use api_cli_commands::*;
+        match self.command {
+            DownloadLink { nxmurl } => {
+                let settings = Settings::load_or_default()?;
+                let nxm = NXMUrl::from_str(&nxmurl).unwrap();
+                println!("Downlaod Link: {}", download_link(settings.apikey.unwrap(), &nxm.game_id, nxm.file_id, nxm.mod_id, nxm.key.as_deref(), nxm.expires).unwrap());
+                Ok(())
+            },
+        }
+    }
+}
 
 #[derive(Args)]
 struct config_cli {
@@ -45,7 +76,7 @@ enum config_cli_commands {
     Clear
 }
 
-impl config_cli {
+impl MmCliCommand for config_cli {
     fn run(self) -> io::Result<()> {
         use config_cli_commands::*;
         Ok(match self.command {
@@ -94,7 +125,7 @@ macro_rules! stamp_out_settings {
     };
 }
 stamp_out_settings! {
-    api_key: String
+    apikey: String
 }
 // #[derive(Serialize, Deserialize, Debug, Default)]
 // struct Settings {
@@ -129,9 +160,5 @@ impl Settings {
 fn main() {
     env_logger::init();
     let cli = mm_cli::parse();
-    use mm_cli_subcommands::*;
-    match cli.command {
-        Config(conf) => conf.run().unwrap(),
-        _ => (),
-    }
+    cli.command.run().unwrap();
 }

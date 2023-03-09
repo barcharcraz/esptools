@@ -9,7 +9,8 @@ tokio-tungstenite = {version = "*", features = ["native-tls"]}
 url = "*"
 thiserror = "*"
 uuid = {version = "*", features = ["v4"]}
-reqwest = "*"
+reqwest = {version = "*", features = ["blocking", "json", "stream"]}
 serde = "*"
 serde_derive = "*"
 toml = "*"
+log = "*"

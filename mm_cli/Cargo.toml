@@ -11,6 +11,7 @@ description = "mod manager cli"
 
 [dependencies]
 clap = { version = "*", features = ["derive", "cargo"] }
+enum_dispatch = "*"
 env_logger = "*"
 log = "*"
 mm_api_interaction = { path = "../mm_api_interaction"}
