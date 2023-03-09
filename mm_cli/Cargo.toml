@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Charles Barto
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+
+[package]
+name = "mm_cli"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-3.0-only"
+description = "mod manager cli"
+
+[dependencies]
+clap = { version = "*", features = ["derive", "cargo"] }
+env_logger = "*"
+log = "*"
+mm_api_interaction = { path = "../mm_api_interaction"}
+serde = { version = "*", features = ["derive"] }
+strum = {version = "*", features = ["derive"] }
+toml = "*"

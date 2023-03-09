@@ -1,8 +1,8 @@
-use std::{backtrace::Backtrace, collections::HashMap, hash::Hash, str::FromStr};
-
 // SPDX-FileCopyrightText: Charles Barto
 //
 // SPDX-License-Identifier: LGPL-3.0-only
+
+use std::{backtrace::Backtrace, collections::HashMap, hash::Hash, str::FromStr};
 use thiserror::Error;
 use url::Url;
 pub struct NXMUrl {
@@ -41,7 +41,8 @@ impl TryFrom<Url> for NXMUrl {
                 },
                 extra_params: query_map,
             })
-        })().ok_or(NXMFromUrlError)
+        })()
+        .ok_or(NXMFromUrlError)
     }
 }
 
