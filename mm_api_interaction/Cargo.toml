@@ -10,7 +10,9 @@ url = "*"
 thiserror = "*"
 uuid = {version = "*", features = ["v4"]}
 reqwest = {version = "*", features = ["blocking", "json", "stream"]}
-serde = "*"
-serde_derive = "*"
 toml = "*"
 log = "*"
+serde = {version = "*", features = ["derive"], optional = true}
+
+[features]
+default = ["serde"]

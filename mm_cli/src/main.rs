@@ -5,6 +5,7 @@
 use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use log::{info, log};
+use mm_api_interaction::{api::sync::download_link, nxm::NXMUrl};
 use serde::{Deserialize, Serialize};
 use std::{
     env::current_exe,
@@ -12,11 +13,9 @@ use std::{
     io::{self, Write},
     path::PathBuf,
     str::FromStr,
-    stringify
+    stringify,
 };
 use strum::{EnumDiscriminants, EnumString, IntoStaticStr};
-use mm_api_interaction::api::sync::download_link;
-use mm_api_interaction::nxm::NXMUrl;
 
 #[enum_dispatch(mm_cli_subcommands)]
 trait MmCliCommand {
@@ -40,12 +39,12 @@ enum mm_cli_subcommands {
 #[derive(Args)]
 struct api_cli {
     #[command(subcommand)]
-    command: api_cli_commands
+    command: api_cli_commands,
 }
 
 #[derive(Subcommand)]
 enum api_cli_commands {
-    DownloadLink {nxmurl: String}
+    DownloadLink { nxmurl: String },
 }
 
 impl MmCliCommand for api_cli {
@@ -55,9 +54,20 @@ impl MmCliCommand for api_cli {
             DownloadLink { nxmurl } => {
                 let settings = Settings::load_or_default()?;
                 let nxm = NXMUrl::from_str(&nxmurl).unwrap();
-                println!("Downlaod Link: {}", download_link(settings.apikey.unwrap(), &nxm.game_id, nxm.file_id, nxm.mod_id, nxm.key.as_deref(), nxm.expires).unwrap());
+                println!(
+                    "Downlaod Link: {}",
+                    download_link(
+                        settings.apikey.unwrap(),
+                        &nxm.game_id,
+                        nxm.file_id,
+                        nxm.mod_id,
+                        nxm.key.as_deref(),
+                        nxm.expires
+                    )
+                    .unwrap()
+                );
                 Ok(())
-            },
+            }
         }
     }
 }
@@ -73,7 +83,7 @@ enum config_cli_commands {
     Get { key: String },
     Set { key: String, value: String },
     List,
-    Clear
+    Clear,
 }
 
 impl MmCliCommand for config_cli {
@@ -92,9 +102,7 @@ impl MmCliCommand for config_cli {
                 let settings = Settings::load_or_default()?;
                 println!("{}: {}", key, settings.get(&key));
             }
-            Clear => {
-                Settings::load_or_default()?.save()?
-            }
+            Clear => Settings::load_or_default()?.save()?,
             _ => (),
         })
     }
@@ -136,7 +144,8 @@ impl Settings {
     fn default_path() -> io::Result<PathBuf> {
         let path = current_exe()?
             .parent()
-            .ok_or(io::ErrorKind::NotFound)?.join("config.toml");
+            .ok_or(io::ErrorKind::NotFound)?
+            .join("config.toml");
         Ok(path)
     }
     fn load_from_default_path() -> io::Result<Self> {
