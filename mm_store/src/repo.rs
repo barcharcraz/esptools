@@ -6,7 +6,7 @@ use crate::perms::PermissionsExtExt;
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
