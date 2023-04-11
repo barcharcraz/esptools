@@ -14,11 +14,11 @@ use std::{
     ffi::OsString,
     fmt::{self, Debug},
     io::{self, copy, ErrorKind, Read, Write},
-    ptr::NonNull,
+    ptr::{hash, NonNull},
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
-use zvariant::{from_slice, gvariant, to_bytes, DynamicType, EncodingContext, Type, Value};
+use zvariant::{from_slice, gvariant, to_bytes, DynamicType, EncodingContext, Type, Value, OwnedValue};
 
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default)]
@@ -72,18 +72,39 @@ fn gv_hash_and_val(value: &(impl Serialize + Type)) -> (Checksum, Vec<u8>) {
     (chk, data)
 }
 
-#[derive(Debug, Display, PartialEq, Clone, Copy)]
-#[strum(serialize_all = "kebab-case")]
-pub enum ObjectType {
+pub trait Object {
+    const OBJECT_TYPE: ObjectType;
+}
+
+macro_rules! stamp_out_object_enum {
+    (
+        $($name1:ident $(<$lt:lifetime>)? $(=$n:literal)?),*
+        !,
+        $($name2:ident),*
+    ) => {
+        #[derive(Debug, Display, PartialEq, Clone, Copy)]
+        #[strum(serialize_all = "kebab-case")]
+        pub enum ObjectType {
+            $($name1 $(= $n)?,)*
+            $($name2),*
+        }
+        $(impl$(<$lt>)? Object for $name1 $(<$lt>)? {
+            const OBJECT_TYPE: ObjectType = ObjectType::$name1;
+        })*
+    };
+}
+
+stamp_out_object_enum! {
     File = 1,
     DirTree,
     DirMeta,
-    Commit,
+    Commit
+    !, // this seperates enumerants we have a type for from others
     TombstoneCommit,
     Commitmeta,
     PayloadLink,
     FileXattrs,
-    FileXattrsLink,
+    FileXattrsLink
 }
 
 impl ObjectType {
@@ -137,9 +158,8 @@ pub struct RelatedObject {
     pub checksum: Checksum,
 }
 #[derive(Debug, Serialize, Deserialize, Type)]
-pub struct Commit<'a> {
-    #[serde(borrow)]
-    pub metadata: BTreeMap<String, Value<'a>>,
+pub struct Commit {
+    pub metadata: BTreeMap<String, OwnedValue>,
     pub parent: Checksum,
     pub related_objects: Vec<RelatedObject>,
     pub subject: String,
@@ -236,64 +256,79 @@ fn test_sigs_match_upstream() {
 }
 
 #[derive(Debug)]
-enum MutableTree<'repo> {
+pub enum MutableTree<'repo> {
     Lazy {
         checksums: DirTreeChecksums,
-        repo: &'repo Repo,
+        repo: &'repo OsTreeRepo,
     },
-    Whole {
-        files: BTreeMap<String, Checksum>,
-        subdirs: BTreeMap<String, MutableTree<'repo>>,
-    },
+    Whole(MutableTreeWhole<'repo>),
+}
+
+#[derive(Debug)]
+pub struct MutableTreeWhole<'repo> {
+    files: BTreeMap<String, Checksum>,
+    subdirs: BTreeMap<String, MutableTree<'repo>>,
 }
 
 impl<'repo> MutableTree<'repo> {
     pub fn new() -> Self {
-        Self::Whole {
+        Self::Whole(MutableTreeWhole {
             files: BTreeMap::new(),
             subdirs: BTreeMap::new(),
-        }
+        })
     }
 
-    pub fn from_dirtree_chk(repo: &'repo Repo, dtree: DirTree) -> Self {
-        Self::Whole {
+    pub fn from_dirtree_chk(repo: &'repo OsTreeRepo, dtree: DirTree) -> Self {
+        Self::Whole(MutableTreeWhole {
             files: dtree.files,
             subdirs: dtree
                 .dirs
                 .into_iter()
                 .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
                 .collect(),
-        }
+        })
     }
 
-    pub fn new_lazy_from_repo(repo: &'repo Repo, chk: DirTreeChecksums) -> Self {
+    pub fn new_lazy_from_repo(repo: &'repo OsTreeRepo, chk: DirTreeChecksums) -> Self {
         Self::Lazy {
             checksums: chk,
             repo: repo,
         }
     }
 
-    pub fn make_whole(&mut self) -> Result<(), RepoError> {
+    pub fn make_whole<'s>(&mut self) -> Result<&mut MutableTreeWhole<'repo>, RepoError>
+    where
+        's: 'repo,
+    {
         use MutableTree::*;
         match self {
-            Whole => Ok(()),
-            Lazy {checksums, repo } => {
-                let dirtree = repo.load_dirtree(&checksums.checksum)?;
-                *self = Whole {
+            Whole(ref mut w) => Ok(w),
+            Lazy { checksums, repo } => {
+                let dirtree: DirTree = repo.try_load(&checksums.checksum)?.unwrap();
+                *self = Whole(MutableTreeWhole {
                     files: dirtree.files,
                     subdirs: dirtree
                         .dirs
                         .into_iter()
                         .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
                         .collect(),
-                };
-                Ok(())
+                });
+                // we just made ourselves whole so this will return a reference to the above just-constructed tree
+                self.make_whole()
             }
         }
     }
-    pub fn ensure_dir(&mut self, dir_name: &str) -> Result<&mut MutableTree, RepoError> {
-        self.make_whole()?;
-
+    pub fn ensure_dir(&mut self, dir_name: &str) -> Result<&mut MutableTree<'repo>, RepoError> {
+        let tree = self.make_whole()?;
+        if tree.files.contains_key(dir_name) {
+            return Err(RepoError::InvalidMtree(format!(
+                "Can't replace file with directory: {dir_name}"
+            )));
+        }
+        Ok(tree
+            .subdirs
+            .entry(dir_name.to_owned())
+            .or_insert(Self::new()))
     }
 }
 
@@ -357,7 +392,7 @@ impl DirTreeChecksums {
 // }
 
 #[derive(Debug)]
-pub struct Repo {
+pub struct OsTreeRepo {
     repo_dir: Dir,
     objects_dir: Dir,
     mode: RepoMode,
@@ -367,8 +402,8 @@ pub struct Repo {
 pub enum RepoError {
     #[error("Repo already exists.")]
     AlreadyExists,
-    #[error("Invalid mutable tree")]
-    InvalidMtree,
+    #[error("Invalid mutable tree: {0}")]
+    InvalidMtree(String),
     #[error("Repo is malformed.")]
     MalformedRepo,
     #[error("variant error")]
@@ -393,7 +428,111 @@ impl Default for RepoConfig {
     }
 }
 
-impl Repo {
+pub mod traits {
+    use std::{io::Read};
+
+    use serde::{Deserialize, de::DeserializeOwned};
+
+    use crate::{Checksum, Object, ObjectType};
+
+    use super::from_slice_gv;
+    pub trait RepoRead {
+        type Error;
+        type ObjectHandle: Read;
+        fn try_contains(&self, typ: ObjectType, chk: &Checksum) -> Result<bool, Self::Error>;
+        // Note: Unlike git OsTree objects don't necessairly know their type,
+        // additionally it's quite possible to have two objects with the same hash, but different object types
+        // in the same repository (for instance you could store a file with the content of a dirmeta object,
+        // as well as that dirmeta object itself).
+        //
+        // Git doesn't have this problem because _all_ objects are prefixed with their size and type on disk
+        // so objects of different types by definition have different hashes, even if they have the same content
+        // (not including this header).
+        fn try_get(
+            &self,
+            typ: ObjectType,
+            chk: &Checksum,
+        ) -> Result<Option<Self::ObjectHandle>, Self::Error>;
+
+        fn contains(&self, typ: ObjectType, chk: &Checksum) -> bool {
+            self.try_contains(typ, chk).unwrap_or(false)
+        }
+        fn get(&self, typ: ObjectType, chk: &Checksum) -> Option<Self::ObjectHandle> {
+            self.try_get(typ, chk).unwrap_or_default()
+        }
+    }
+
+    pub trait RepoWrite {
+        type Error;
+        fn write(&mut self, typ: ObjectType, object: impl Read) -> Result<Checksum, Self::Error>;
+    }
+
+    pub trait RepoReadExt<T>: RepoRead {
+        fn try_load(&self, chk: &Checksum) -> Result<Option<T>, Self::Error>;
+        fn load(&self, chk: &Checksum) -> Option<T> {
+            self.try_load(chk).unwrap_or_default()
+        }
+    }
+    impl<T, R> RepoReadExt<T> for R
+    where
+        T: zvariant::Type + DeserializeOwned + Object,
+        R: RepoRead,
+        R::Error: From<std::io::Error> + From<zvariant::Error>
+    {
+        fn try_load(&self, chk: &Checksum) -> Result<Option<T>, Self::Error> {
+            let mut bytes = Vec::new();
+            let Some(mut handle) = 
+                self.try_get(T::OBJECT_TYPE, chk)?
+            else {
+                return Ok(None);
+            };
+            handle.read_to_end(&mut bytes)?;
+            Ok(Some(from_slice_gv::<T>(&bytes)?))
+        }
+    }
+}
+pub use traits::RepoReadExt;
+
+impl traits::RepoWrite for OsTreeRepo {
+    type Error = RepoError;
+
+    fn write(&mut self, typ: ObjectType, mut object: impl Read) -> Result<Checksum, Self::Error> {
+        let mut hasher = Sha256::new();
+        copy(&mut object, &mut hasher)?;
+        let chk = hasher.finalize().to_vec().into_boxed_slice().into();
+        let mut fd = self.new_object_fd_mut(ObjectType::File, &chk)?;
+        copy(&mut object, &mut fd)?;
+        Ok(chk)
+    }
+}
+
+impl traits::RepoRead for OsTreeRepo {
+    type Error = RepoError;
+
+    type ObjectHandle = File;
+
+    fn try_contains(&self, typ: ObjectType, chk: &Checksum) -> Result<bool, Self::Error> {
+        Ok(self.objects_dir.try_exists(loose_path(chk, typ, self.mode))?)
+    }
+
+    fn try_get(
+        &self,
+        typ: ObjectType,
+        chk: &Checksum,
+    ) -> Result<Option<Self::ObjectHandle>, Self::Error> {
+        if self.mode != RepoMode::BareUserOnly {
+            unimplemented!()
+        }
+        let p = loose_path(chk, typ, self.mode);
+        match self.objects_dir.open(p) {
+            Ok(f) => Ok(Some(f)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl OsTreeRepo {
     const STATE_DIRS: &[&'static str] = &[
         "tmp",
         "extensions",
@@ -405,7 +544,7 @@ impl Repo {
         "objects",
     ];
 
-    pub fn create(path: &Utf8Path) -> Result<Repo, RepoError> {
+    pub fn create(path: &Utf8Path) -> Result<OsTreeRepo, RepoError> {
         std::fs::create_dir(path)?;
         let repo_dir = Dir::open_ambient_dir(path, ambient_authority())?;
         if repo_dir.is_dir("objects") {
@@ -420,15 +559,12 @@ impl Repo {
         for dir_path in Self::STATE_DIRS {
             repo_dir.create_dir(dir_path)?;
         }
-        let result = Repo {
+        let result = OsTreeRepo {
             objects_dir: repo_dir.open_dir("objects")?,
             repo_dir,
             mode: RepoMode::BareUserOnly,
         };
         Ok(result)
-    }
-    fn has_object(&self, typ: ObjectType, chk: &Checksum) -> io::Result<bool> {
-        self.objects_dir.try_exists(loose_path(chk, typ, self.mode))
     }
 
     pub fn object_fd(&self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
@@ -458,15 +594,6 @@ impl Repo {
         self.object_fd(ObjectType::DirTree, chk)?
             .read_to_end(&mut bytes)?;
         Ok(from_slice_gv::<DirTree>(&bytes)?)
-    }
-
-    pub fn write_content(&mut self, mut file: impl Read) -> io::Result<Checksum> {
-        let mut hasher = Sha256::new();
-        copy(&mut file, &mut hasher)?;
-        let chk = hasher.finalize().to_vec().into_boxed_slice().into();
-        let mut fd = self.new_object_fd_mut(ObjectType::File, &chk)?;
-        copy(&mut file, &mut fd)?;
-        Ok(chk)
     }
 
     pub fn write_dirmeta(&mut self, meta: &DirMeta) -> io::Result<Checksum> {
