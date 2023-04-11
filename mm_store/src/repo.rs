@@ -6,19 +6,17 @@ use crate::perms::PermissionsExtExt;
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
-use serde::{de, de::Visitor, Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    ffi::OsString,
     fmt::{self, Debug},
-    io::{self, copy, ErrorKind, Read, Write},
-    ptr::{hash, NonNull},
+    io::{self, copy, Read, Write},
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
-use zvariant::{from_slice, gvariant, to_bytes, DynamicType, EncodingContext, Type, Value, OwnedValue};
+use zvariant::{from_slice, to_bytes, EncodingContext, Type, OwnedValue};
 
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default)]
@@ -431,7 +429,7 @@ impl Default for RepoConfig {
 pub mod traits {
     use std::{io::Read};
 
-    use serde::{Deserialize, de::DeserializeOwned};
+    use serde::{de::DeserializeOwned};
 
     use crate::{Checksum, Object, ObjectType};
 
@@ -500,7 +498,7 @@ impl traits::RepoWrite for OsTreeRepo {
         let mut hasher = Sha256::new();
         copy(&mut object, &mut hasher)?;
         let chk = hasher.finalize().to_vec().into_boxed_slice().into();
-        let mut fd = self.new_object_fd_mut(ObjectType::File, &chk)?;
+        let mut fd = self.new_object_fd_mut(typ, &chk)?;
         copy(&mut object, &mut fd)?;
         Ok(chk)
     }
@@ -603,5 +601,5 @@ impl OsTreeRepo {
         Ok(chk)
     }
 
-    pub fn write_dfd_to_mtree(&mut self, dfd: Dir, mtree: &mut MutableTree) {}
+    pub fn write_dfd_to_mtree(&mut self, _dfd: Dir, _mtree: &mut MutableTree) {}
 }
