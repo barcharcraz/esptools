@@ -11,5 +11,8 @@
 #[cfg(windows)]
 mod xattr_util;
 pub mod repo;
+
+
+pub mod mutable_tree;
 pub mod perms;
 pub use crate::repo::*;

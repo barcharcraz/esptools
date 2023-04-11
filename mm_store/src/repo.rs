@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug},
-    io::{self, copy, Read, Write},
+    io::{self, copy, Read, Write}, borrow::Borrow,
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
@@ -253,88 +253,6 @@ fn test_sigs_match_upstream() {
     assert_eq!(DirTree::signature(), "(a(say)a(sayay))");
 }
 
-#[derive(Debug)]
-pub enum MutableTree<'repo> {
-    Lazy {
-        checksums: DirTreeChecksums,
-        repo: &'repo OsTreeRepo,
-    },
-    Whole(MutableTreeWhole<'repo>),
-}
-
-#[derive(Debug)]
-pub struct MutableTreeWhole<'repo> {
-    files: BTreeMap<String, Checksum>,
-    subdirs: BTreeMap<String, MutableTree<'repo>>,
-}
-
-impl<'repo> MutableTree<'repo> {
-    pub fn new() -> Self {
-        Self::Whole(MutableTreeWhole {
-            files: BTreeMap::new(),
-            subdirs: BTreeMap::new(),
-        })
-    }
-
-    pub fn from_dirtree_chk(repo: &'repo OsTreeRepo, dtree: DirTree) -> Self {
-        Self::Whole(MutableTreeWhole {
-            files: dtree.files,
-            subdirs: dtree
-                .dirs
-                .into_iter()
-                .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
-                .collect(),
-        })
-    }
-
-    pub fn new_lazy_from_repo(repo: &'repo OsTreeRepo, chk: DirTreeChecksums) -> Self {
-        Self::Lazy {
-            checksums: chk,
-            repo: repo,
-        }
-    }
-
-    pub fn make_whole<'s>(&mut self) -> Result<&mut MutableTreeWhole<'repo>, RepoError>
-    where
-        's: 'repo,
-    {
-        use MutableTree::*;
-        match self {
-            Whole(ref mut w) => Ok(w),
-            Lazy { checksums, repo } => {
-                let dirtree: DirTree = repo.try_load(&checksums.checksum)?.unwrap();
-                *self = Whole(MutableTreeWhole {
-                    files: dirtree.files,
-                    subdirs: dirtree
-                        .dirs
-                        .into_iter()
-                        .map(|(k, v)| (k, Self::new_lazy_from_repo(repo, v)))
-                        .collect(),
-                });
-                // we just made ourselves whole so this will return a reference to the above just-constructed tree
-                self.make_whole()
-            }
-        }
-    }
-    pub fn ensure_dir(&mut self, dir_name: &str) -> Result<&mut MutableTree<'repo>, RepoError> {
-        let tree = self.make_whole()?;
-        if tree.files.contains_key(dir_name) {
-            return Err(RepoError::InvalidMtree(format!(
-                "Can't replace file with directory: {dir_name}"
-            )));
-        }
-        Ok(tree
-            .subdirs
-            .entry(dir_name.to_owned())
-            .or_insert(Self::new()))
-    }
-}
-
-impl Default for MutableTree<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 pub fn hash_file(file: &mut File) -> io::Result<Checksum> {
     let mut hasher = Sha256::new();
@@ -360,34 +278,6 @@ impl DirTreeChecksums {
         }
     }
 }
-
-//     pub fn new_recursive_blank(dir: Dir) -> io::Result<MutableTree> {
-//         let mut result = Self::new();
-//         fn handle_inval(o: OsString) -> io::Error {
-//             io::Error::new(ErrorKind::InvalidData, o.to_string_lossy())
-//         }
-//         for ent in dir.entries()?.flatten() {
-//             if ent.file_type()?.is_dir() {
-//                 // TODO: NFC
-//                 result.insert_child(
-//                     ent.file_name().into_string().map_err(handle_inval)?,
-//                     Self::new_recursive_blank(ent.open_dir()?)?,
-//                 );
-//             } else {
-//                 result.files.insert(
-//                     ent.file_name().into_string().map_err(handle_inval)?,
-//                     hash_file(&mut ent.open()?)?,
-//                 );
-//             }
-//         }
-//         let ctx = EncodingContext::<BE>::new_gvariant(0);
-//         let mut hasher = Sha256::new();
-//         let dt = result.as_dirtree();
-//         hasher.update(to_bytes(ctx, &dt).unwrap());
-//         result.contents_checksum = hasher.finalize().to_vec().into();
-//         Ok(result)
-//     }
-// }
 
 #[derive(Debug)]
 pub struct OsTreeRepo {
@@ -542,7 +432,7 @@ impl OsTreeRepo {
         "objects",
     ];
 
-    pub fn create(path: &Utf8Path) -> Result<OsTreeRepo, RepoError> {
+    fn _create(path: &Utf8Path) -> Result<OsTreeRepo, RepoError> {
         std::fs::create_dir(path)?;
         let repo_dir = Dir::open_ambient_dir(path, ambient_authority())?;
         if repo_dir.is_dir("objects") {
@@ -563,6 +453,10 @@ impl OsTreeRepo {
             mode: RepoMode::BareUserOnly,
         };
         Ok(result)
+    }
+
+    pub fn create(path: impl AsRef<Utf8Path>) -> Result<OsTreeRepo, RepoError> {
+        Self::_create(path.as_ref())
     }
 
     pub fn object_fd(&self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
