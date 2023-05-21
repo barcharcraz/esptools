@@ -4,7 +4,7 @@
 
 use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
-use log::{info, log};
+use log::{info};
 use mm_api_interaction::{api::sync::download_link, nxm::NXMUrl};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,7 +15,6 @@ use std::{
     str::FromStr,
     stringify,
 };
-use strum::{EnumDiscriminants, EnumString, IntoStaticStr};
 
 #[enum_dispatch(mm_cli_subcommands)]
 trait MmCliCommand {
@@ -91,7 +90,7 @@ impl MmCliCommand for config_cli {
         use config_cli_commands::*;
         Ok(match self.command {
             List => {
-                println!("{:?}", Settings::load_or_default());
+                println!("{:#?}", Settings::load_or_default()?);
             }
             Set { key, value } => {
                 let mut settings = Settings::load_or_default()?;

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 
-use crate::perms::PermissionsExtExt;
+use crate::{perms::PermissionsExtExt, mutable_tree::MutableTree};
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
