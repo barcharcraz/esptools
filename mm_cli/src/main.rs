@@ -18,7 +18,7 @@ use std::{
 
 #[enum_dispatch(mm_cli_subcommands)]
 trait MmCliCommand {
-    fn run(self) -> io::Result<()>;
+    fn run(self) -> anyhow::Result<()>;
 }
 
 #[derive(Parser)]
@@ -47,7 +47,7 @@ enum api_cli_commands {
 }
 
 impl MmCliCommand for api_cli {
-    fn run(self) -> io::Result<()> {
+    fn run(self) -> anyhow::Result<()> {
         use api_cli_commands::*;
         match self.command {
             DownloadLink { nxmurl } => {
@@ -86,7 +86,7 @@ enum config_cli_commands {
 }
 
 impl MmCliCommand for config_cli {
-    fn run(self) -> io::Result<()> {
+    fn run(self) -> anyhow::Result<()> {
         use config_cli_commands::*;
         Ok(match self.command {
             List => {
@@ -147,20 +147,20 @@ impl Settings {
             .join("config.toml");
         Ok(path)
     }
-    fn load_from_default_path() -> io::Result<Self> {
+    fn load_from_default_path() -> anyhow::Result<Self> {
         info!("Loading from default path");
         Ok(toml::from_str(&fs::read_to_string(Self::default_path()?)?)?)
     }
-    fn load_or_default() -> io::Result<Self> {
-        match Self::load_from_default_path() {
+    fn load_or_default() -> anyhow::Result<Self> {
+        match fs::read_to_string(Self::default_path()?) {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
-            Ok(c) => Ok(c),
-            Err(e) => Err(e),
+            Ok(s) => Ok(toml::from_str(&s)?),
+            Err(e) => Err(e.into()),
         }
     }
     fn save(&self) -> io::Result<()> {
         let mut f = File::create(Self::default_path()?)?;
-        f.write_all(toml::to_vec(self).unwrap().as_ref())?;
+        write!(f, "{}", toml::to_string(self).unwrap());
         Ok(())
     }
 }

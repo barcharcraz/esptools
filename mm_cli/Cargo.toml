@@ -18,3 +18,4 @@ mm_api_interaction = { path = "../mm_api_interaction"}
 serde = { version = "*", features = ["derive"] }
 strum = {version = "*", features = ["derive"] }
 toml = "*"
+anyhow = "*"
