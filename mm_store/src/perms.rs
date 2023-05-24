@@ -35,7 +35,7 @@ pub mod win32 {
         ptr::null_mut,
     };
     use windows::Win32::{
-        Foundation::{HANDLE, PSID},
+        Foundation::{HANDLE, PSID, HLOCAL},
         Security::{
             Authorization::{
                 BuildTrusteeWithSidW, GetEffectiveRightsFromAclW, GetSecurityInfo, SE_FILE_OBJECT,
@@ -62,10 +62,7 @@ pub mod win32 {
     impl Drop for SecurityInfo {
         fn drop(&mut self) {
             unsafe {
-                match LocalFree(transmute(self.desc)) {
-                    0 => (),
-                    _ => panic!("memory deallocation failed"),
-                }
+                LocalFree(transmute::<PSECURITY_DESCRIPTOR, HLOCAL>(self.desc)).unwrap();
             };
         }
     }
