@@ -46,7 +46,7 @@ pub mod win32 {
             PSECURITY_DESCRIPTOR,
         },
         Storage::FileSystem::{
-            FILE_ACCESS_FLAGS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+            FILE_ACCESS_RIGHTS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
         },
         System::Memory::LocalFree,
     };
@@ -120,7 +120,7 @@ pub mod win32 {
         }
     }
 
-    fn access_mask_to_unix_perms(mask: FILE_ACCESS_FLAGS) -> u32 {
+    fn access_mask_to_unix_perms(mask: FILE_ACCESS_RIGHTS) -> u32 {
         let mut result = 0;
         if mask & FILE_GENERIC_EXECUTE == FILE_GENERIC_EXECUTE {
             result += 1;
@@ -133,8 +133,8 @@ pub mod win32 {
         }
         result
     }
-    fn unix_perms_to_access_mask(perms: u8) -> FILE_ACCESS_FLAGS {
-        let mut result = FILE_ACCESS_FLAGS::default();
+    fn unix_perms_to_access_mask(perms: u8) -> FILE_ACCESS_RIGHTS {
+        let mut result = FILE_ACCESS_RIGHTS::default();
         if perms & 1 == 1 {
             result |= FILE_GENERIC_EXECUTE;
         }
@@ -154,7 +154,7 @@ pub mod win32 {
         unsafe fn unix_perms(sid: PSID, dacl: *const ACL) -> Result<u32, windows::core::Error> {
             let mut trustee = TRUSTEE_W::default();
             BuildTrusteeWithSidW(&mut trustee, sid);
-            let mut access_rights = FILE_ACCESS_FLAGS::default();
+            let mut access_rights = FILE_ACCESS_RIGHTS::default();
             GetEffectiveRightsFromAclW(dacl, &trustee, &mut access_rights.0).ok()?;
             Ok(access_mask_to_unix_perms(access_rights))
         }

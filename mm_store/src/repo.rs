@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::{self, Debug},
     io::{self, copy, Read, Write}, borrow::Borrow,
 };
@@ -495,5 +495,13 @@ impl OsTreeRepo {
         Ok(chk)
     }
 
-    pub fn write_dfd_to_mtree(&mut self, _dfd: Dir, _mtree: &mut MutableTree) {}
+    pub fn write_dfd_to_mtree(&mut self, dfd: Dir, _mtree: &mut MutableTree) -> Result<(), RepoError> {
+        let mut dirs_to_go = Vec::new();
+        dirs_to_go.append(&mut dfd.entries()?.flatten().collect());
+        Ok(())
+        // while !dirs_to_go.is_empty() {
+        //     let item = dirs_to_go.pop().unwrap();
+        //     item.en
+        // }
+    }
 }
