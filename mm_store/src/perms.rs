@@ -62,7 +62,10 @@ pub mod win32 {
     impl Drop for SecurityInfo {
         fn drop(&mut self) {
             unsafe {
-                LocalFree(transmute::<PSECURITY_DESCRIPTOR, HLOCAL>(self.desc)).unwrap();
+                // FIXME: error handling is impossible for LocalFree
+                // because of a bug in windows-rs, fixed in metadata but not in
+                // windows-rs yet
+                _ = LocalFree(HLOCAL(self.desc.0 as isize));
             };
         }
     }

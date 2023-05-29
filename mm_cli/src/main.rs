@@ -135,7 +135,7 @@ impl MmCliCommand for store_cli {
             WriteDirTree { dir } => {
                 let mut repo = OsTreeRepo::open(&self.repo_dir)?;
                 let mut mtree = MutableTree::new();
-                repo.write_dirpath_to_mtree(dir, &mut mtree)?;
+                repo.write_dirpath_to_mtree(&dir, &mut mtree)?;
             },
             Init => {
                 OsTreeRepo::create(&self.repo_dir)?;

@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap},
     fmt::{self, Debug},
     io::{self, copy, Read, Write}, borrow::Borrow, ffi::OsString, path::Path, backtrace::Backtrace,
 };
-use strum_macros::{Display, EnumString};
+use strum_macros::{Display, EnumString, AsRefStr, IntoStaticStr};
 use thiserror::Error;
 use zvariant::{from_slice, to_bytes, EncodingContext, Type, OwnedValue};
 
@@ -80,7 +80,7 @@ macro_rules! stamp_out_object_enum {
         !,
         $($name2:ident),*
     ) => {
-        #[derive(Debug, Display, PartialEq, Clone, Copy)]
+        #[derive(Debug, Display, PartialEq, Clone, Copy, AsRefStr)]
         #[strum(serialize_all = "kebab-case")]
         pub enum ObjectType {
             $($name1 $(= $n)?,)*
@@ -138,17 +138,29 @@ fn test_repo_mode() {
 
 pub fn loose_path(checksum: &Checksum, typ: ObjectType, mode: RepoMode) -> Utf8PathBuf {
     let checksum = hex::encode(checksum);
-    [
-        &checksum[0..2],
-        &checksum[2..],
-        typ.to_string().as_str(),
-        match mode {
-            RepoMode::ArchiveZ2 if typ.is_meta() => &"z",
-            _ => &"",
-        },
-    ]
-    .into_iter()
-    .collect()
+    // not exact but 15 should be enough for the extension and all seperators
+    let mut result = Utf8PathBuf::with_capacity(checksum.len() + 15);
+    #[cfg(debug_assertions)]
+    let starting_cap = result.capacity();
+    result.push(&checksum[0..2]);
+    result.push(&checksum[2..]);
+    result.set_extension([typ.as_ref(), match mode {
+        RepoMode::ArchiveZ2 if !typ.is_meta() => &"z",
+        _ => &""
+    }].concat());
+    // [
+    //     &checksum[0..2],
+    //     &checksum[2..],
+    //     typ.to_string().as_str(),
+    //     match mode {
+    //         RepoMode::ArchiveZ2 if typ.is_meta() => &"z",
+    //         _ => &"",
+    //     },
+    // ]
+    // .into_iter()
+    // .collect();
+    debug_assert_eq!(starting_cap, result.capacity(), "loose_path had to allocate, increase the capacity");
+    result
 }
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct RelatedObject {
@@ -518,6 +530,7 @@ impl OsTreeRepo {
             unimplemented!()
         }
         let p = loose_path(chk, typ, self.config.mode);
+        self.objects_dir.create_dir(p.parent().unwrap())?;
         self.objects_dir
             .open_with(p, OpenOptions::new().create_new(true).write(true))
     }
@@ -546,18 +559,19 @@ impl OsTreeRepo {
              let item = item?;
              let file_type = item.file_type()?;
              if file_type.is_dir() {
-                 let mut child = mtree.ensure_dir(item.file_name()?)?;
-                 self.write_dfd_to_mtree(item.open_dir()?, &mut child)?;
+                let mut child = mtree.ensure_dir(item.file_name()?)?;
+                self.write_dfd_to_mtree(item.open_dir()?, &mut child)?;
              } else if file_type.is_file() {
-                 let mut fd = item.open()?;
-                 let chk = self.write(ObjectType::File, &mut fd)?;
-                 mtree.replace_file(item.file_name()?, chk)?;
+                println!("{}", item.file_name()?);
+                let mut fd = item.open()?;
+                let chk = self.write(ObjectType::File, &mut fd)?;
+                mtree.replace_file(item.file_name()?, chk)?;
              }
          }
 
         Ok(())
     }
-    pub fn write_dirpath_to_mtree(&mut self, dir: impl AsRef<Utf8Path>, mtree: &mut MutableTree) -> Result<(), RepoError> {
+    pub fn write_dirpath_to_mtree(&mut self, dir: &impl AsRef<Utf8Path>, mtree: &mut MutableTree) -> Result<(), RepoError> {
         let dfd = Dir::open_ambient_dir(dir, ambient_authority())?;
         self.write_dfd_to_mtree(dfd, mtree)
     }

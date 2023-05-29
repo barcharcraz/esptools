@@ -53,7 +53,7 @@ mod tests {
         unsafe {
             let f = CreateFile2(
         PCWSTR::from_raw(u16cstr!("C:\\Users\\bartoc\\source\\ostree-test\\repo\\objects\\89\\5a1646b95228a5385fa5500f94507e09046e33d1db921292836db437206f39.file").as_ptr()),
-        FILE_GENERIC_READ, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, None).unwrap();
+        FILE_GENERIC_READ.0, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, None).unwrap();
             let mut full_ea_info = [0u8; 100];
             let mut status_block = IO_STATUS_BLOCK::default();
             let res = NtQueryEaFile(
