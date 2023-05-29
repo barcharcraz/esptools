@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::{self, Debug},
-    io::{self, copy, Read, Write}, borrow::Borrow,
+    io::{self, copy, Read, Write}, borrow::Borrow, ffi::OsString,
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
@@ -290,6 +290,8 @@ pub struct OsTreeRepo {
 pub enum RepoError {
     #[error("Repo already exists.")]
     AlreadyExists,
+    #[error("Filename is invalid: {0:?}")]
+    InvalidFilename(OsString),
     #[error("Invalid mutable tree: {0}")]
     InvalidMtree(String),
     #[error("Repo is malformed.")]
@@ -379,7 +381,6 @@ pub mod traits {
         }
     }
 }
-pub use traits::RepoReadExt;
 
 impl traits::RepoWrite for OsTreeRepo {
     type Error = RepoError;
@@ -388,7 +389,10 @@ impl traits::RepoWrite for OsTreeRepo {
         let mut hasher = Sha256::new();
         copy(&mut object, &mut hasher)?;
         let chk = hasher.finalize().to_vec().into_boxed_slice().into();
-        let mut fd = self.new_object_fd_mut(typ, &chk)?;
+        let mut fd = match self.new_object_fd_mut(typ, &chk) {
+            Err(ref e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(chk),
+            o => o
+        }?;
         copy(&mut object, &mut fd)?;
         Ok(chk)
     }
@@ -419,6 +423,10 @@ impl traits::RepoRead for OsTreeRepo {
         }
     }
 }
+
+pub use traits::RepoRead;
+pub use traits::RepoWrite;
+pub use traits::RepoReadExt;
 
 impl OsTreeRepo {
     const STATE_DIRS: &[&'static str] = &[
@@ -495,13 +503,24 @@ impl OsTreeRepo {
         Ok(chk)
     }
 
-    pub fn write_dfd_to_mtree(&mut self, dfd: Dir, _mtree: &mut MutableTree) -> Result<(), RepoError> {
-        let mut dirs_to_go = Vec::new();
-        dirs_to_go.append(&mut dfd.entries()?.flatten().collect());
+    pub fn write_dfd_to_mtree(&mut self, dfd: Dir, mtree: &mut MutableTree) -> Result<(), RepoError> {
+        fn invalid_filename(name: OsString) -> Result<String, RepoError> {
+            Err(RepoError::InvalidFilename(name))
+        }
+
+         for item in dfd.entries()? {
+             let item = item?;
+             let file_type = item.file_type()?;
+             if file_type.is_dir() {
+                 let mut child = mtree.ensure_dir(item.file_name().into_string().or_else(invalid_filename)?)?;
+                 self.write_dfd_to_mtree(item.open_dir()?, &mut child)?;
+             } else if file_type.is_file() {
+                 let mut fd = item.open()?;
+                 let chk = self.write(ObjectType::File, &mut fd)?;
+                 mtree.replace_file(item.file_name().into_string().or_else(invalid_filename)?, chk)?;
+             }
+         }
+
         Ok(())
-        // while !dirs_to_go.is_empty() {
-        //     let item = dirs_to_go.pop().unwrap();
-        //     item.en
-        // }
     }
 }
