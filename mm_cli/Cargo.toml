@@ -15,7 +15,9 @@ enum_dispatch = "*"
 env_logger = "*"
 log = "*"
 mm_api_interaction = { path = "../mm_api_interaction"}
+mm_store = { path = "../mm_store" }
 serde = { version = "*", features = ["derive"] }
 strum = {version = "*", features = ["derive"] }
 toml = "*"
 anyhow = "*"
+camino = "*"

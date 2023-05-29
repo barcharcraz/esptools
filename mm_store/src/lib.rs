@@ -7,6 +7,8 @@
 #![feature(map_try_insert)]
 #![feature(new_uninit)]
 #![feature(read_buf)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 #[cfg(windows)]
 mod xattr_util;

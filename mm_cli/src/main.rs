@@ -1,19 +1,23 @@
 // SPDX-FileCopyrightText: Charles Barto
 //
 // SPDX-License-Identifier: LGPL-3.0-only
-
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
+use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use log::{info};
 use mm_api_interaction::{api::sync::download_link, nxm::NXMUrl};
+use mm_store::{OsTreeRepo, mutable_tree::MutableTree};
 use serde::{Deserialize, Serialize};
 use std::{
     env::current_exe,
     fs::{self, File},
     io::{self, Write},
+    error::Error,
     path::PathBuf,
     str::FromStr,
-    stringify,
+    stringify, borrow::Borrow, backtrace::Backtrace, any,
 };
 
 #[enum_dispatch(mm_cli_subcommands)]
@@ -33,6 +37,7 @@ struct mm_cli {
 enum mm_cli_subcommands {
     Api(api_cli),
     Config(config_cli),
+    Store(store_cli)
 }
 
 #[derive(Args)]
@@ -107,6 +112,42 @@ impl MmCliCommand for config_cli {
     }
 }
 
+#[derive(Args)]
+struct store_cli {
+    repo_dir: Utf8PathBuf,
+    #[command(subcommand)]
+    command: store_cli_commands
+}
+#[derive(Subcommand)]
+enum store_cli_commands {
+    WriteDirTree {
+        dir: Utf8PathBuf
+    },
+    Init,
+    DumpRepo
+}
+
+impl MmCliCommand for store_cli {
+    fn run(self) -> anyhow::Result<()> {
+        use camino::{Utf8PathBuf, Utf8Path};
+        use store_cli_commands::*;
+        Ok(match self.command {
+            WriteDirTree { dir } => {
+                let mut repo = OsTreeRepo::open(&self.repo_dir)?;
+                let mut mtree = MutableTree::new();
+                repo.write_dirpath_to_mtree(dir, &mut mtree)?;
+            },
+            Init => {
+                OsTreeRepo::create(&self.repo_dir)?;
+            }
+            DumpRepo => {
+                let repo = OsTreeRepo::open(&self.repo_dir)?;
+                println!("{:?}", repo);
+            }
+        })
+    }
+}
+
 macro_rules! stamp_out_settings {
     ($($vis:vis $name:ident : $typ:ty)*) => {
         #[derive(Serialize, Deserialize, Debug, Default)]
@@ -160,7 +201,7 @@ impl Settings {
     }
     fn save(&self) -> io::Result<()> {
         let mut f = File::create(Self::default_path()?)?;
-        write!(f, "{}", toml::to_string(self).unwrap());
+        write!(f, "{}", toml::to_string(self).unwrap())?;
         Ok(())
     }
 }

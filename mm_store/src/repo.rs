@@ -5,14 +5,14 @@
 use crate::{perms::PermissionsExtExt, mutable_tree::MutableTree};
 use byteorder::BE;
 use camino::{Utf8Path, Utf8PathBuf};
-use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
+use cap_std::{ambient_authority, fs_utf8::*, io_lifetimes::AsFilelike};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::{self, Debug},
-    io::{self, copy, Read, Write}, borrow::Borrow, ffi::OsString,
+    io::{self, copy, Read, Write}, borrow::Borrow, ffi::OsString, path::Path, backtrace::Backtrace,
 };
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
@@ -283,11 +283,11 @@ impl DirTreeChecksums {
 pub struct OsTreeRepo {
     repo_dir: Dir,
     objects_dir: Dir,
-    mode: RepoMode,
+    config: RepoConfig
 }
 
 #[derive(Error, Debug)]
-pub enum RepoError {
+pub enum RepoErrorKind {
     #[error("Repo already exists.")]
     AlreadyExists,
     #[error("Filename is invalid: {0:?}")]
@@ -302,6 +302,25 @@ pub enum RepoError {
     Io(#[from] io::Error),
     #[error("Format error")]
     Format(#[from] fmt::Error),
+}
+#[derive(Error, Debug)]
+#[error("{source}")]
+pub struct RepoError {
+    source: RepoErrorKind,
+    #[backtrace]
+    backtrace: Backtrace
+}
+
+impl<T> From<T> for RepoError
+    where RepoErrorKind: From<T>
+{
+    fn from(value: T) -> Self {
+        Self {
+            source: RepoErrorKind::from(value),
+            backtrace: Backtrace::capture()
+        }
+
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -404,7 +423,7 @@ impl traits::RepoRead for OsTreeRepo {
     type ObjectHandle = File;
 
     fn try_contains(&self, typ: ObjectType, chk: &Checksum) -> Result<bool, Self::Error> {
-        Ok(self.objects_dir.try_exists(loose_path(chk, typ, self.mode))?)
+        Ok(self.objects_dir.try_exists(loose_path(chk, typ, self.config.mode))?)
     }
 
     fn try_get(
@@ -412,10 +431,10 @@ impl traits::RepoRead for OsTreeRepo {
         typ: ObjectType,
         chk: &Checksum,
     ) -> Result<Option<Self::ObjectHandle>, Self::Error> {
-        if self.mode != RepoMode::BareUserOnly {
+        if self.config.mode != RepoMode::BareUserOnly {
             unimplemented!()
         }
-        let p = loose_path(chk, typ, self.mode);
+        let p = loose_path(chk, typ, self.config.mode);
         match self.objects_dir.open(p) {
             Ok(f) => Ok(Some(f)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -441,52 +460,70 @@ impl OsTreeRepo {
     ];
 
     fn _create(path: &Utf8Path) -> Result<OsTreeRepo, RepoError> {
-        std::fs::create_dir(path)?;
-        let repo_dir = Dir::open_ambient_dir(path, ambient_authority())?;
-        if repo_dir.is_dir("objects") {
-            return Err(RepoError::AlreadyExists);
+        if let Err(e) = std::fs::create_dir(path) {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                return Err(RepoErrorKind::AlreadyExists.into())
+            } else {
+                return Err(e.into())
+            }
         }
-
-        let config_data = toml::to_string(&RepoConfig::default()).unwrap();
+        let repo_dir = Dir::open_ambient_dir(path, ambient_authority())?;
+        let config = RepoConfig::default();
 
         repo_dir
             .open_with("config", OpenOptions::new().write(true).create_new(true))?
-            .write_all(config_data.as_ref())?;
+            .write_all(toml::to_string(&config).unwrap().as_ref())?;
         for dir_path in Self::STATE_DIRS {
             repo_dir.create_dir(dir_path)?;
         }
         let result = OsTreeRepo {
             objects_dir: repo_dir.open_dir("objects")?,
             repo_dir,
-            mode: RepoMode::BareUserOnly,
+            config,
         };
         Ok(result)
     }
 
-    pub fn create(path: impl AsRef<Utf8Path>) -> Result<OsTreeRepo, RepoError> {
+    fn _open(path: &Utf8Path) -> Result<OsTreeRepo, RepoError> {
+        let repo_dir: Dir = Dir::open_ambient_dir(path, ambient_authority())?;
+        for dir in Self::STATE_DIRS {
+            if !repo_dir.is_dir(dir) {
+                return Err(RepoErrorKind::MalformedRepo.into());
+            }
+        }
+        let objects_dir = repo_dir.open_dir("objects")?;
+        let config: RepoConfig = toml::from_str(&repo_dir.read_to_string("config")?).or(Err(RepoError::from(RepoErrorKind::MalformedRepo)))?;
+        Ok(OsTreeRepo { repo_dir, objects_dir, config })
+    }
+
+    pub fn create(path: &impl AsRef<Utf8Path>) -> Result<OsTreeRepo, RepoError> {
         Self::_create(path.as_ref())
     }
 
+    pub fn open(path: &impl AsRef<Utf8Path>) -> Result<OsTreeRepo, RepoError> {
+        Self::_open(path.as_ref())
+    }
+
     pub fn object_fd(&self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
-        if self.mode != RepoMode::BareUserOnly {
+        if self.config.mode != RepoMode::BareUserOnly {
             unimplemented!()
         }
-        let p = loose_path(chk, typ, self.mode);
+        let p = loose_path(chk, typ, self.config.mode);
         self.objects_dir.open(p)
     }
 
     /// get a fd for a new object, if the object already exists you get an error with ErrorKind::AlreadyExists
     pub fn new_object_fd_mut(&mut self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
-        if self.mode != RepoMode::BareUserOnly {
+        if self.config.mode != RepoMode::BareUserOnly {
             unimplemented!()
         }
-        let p = loose_path(chk, typ, self.mode);
+        let p = loose_path(chk, typ, self.config.mode);
         self.objects_dir
             .open_with(p, OpenOptions::new().create_new(true).write(true))
     }
 
     pub fn load_dirtree(&self, chk: &Checksum) -> Result<DirTree, RepoError> {
-        if self.mode != RepoMode::BareUserOnly {
+        if self.config.mode != RepoMode::BareUserOnly {
             unimplemented!()
         }
 
@@ -504,23 +541,24 @@ impl OsTreeRepo {
     }
 
     pub fn write_dfd_to_mtree(&mut self, dfd: Dir, mtree: &mut MutableTree) -> Result<(), RepoError> {
-        fn invalid_filename(name: OsString) -> Result<String, RepoError> {
-            Err(RepoError::InvalidFilename(name))
-        }
 
          for item in dfd.entries()? {
              let item = item?;
              let file_type = item.file_type()?;
              if file_type.is_dir() {
-                 let mut child = mtree.ensure_dir(item.file_name().into_string().or_else(invalid_filename)?)?;
+                 let mut child = mtree.ensure_dir(item.file_name()?)?;
                  self.write_dfd_to_mtree(item.open_dir()?, &mut child)?;
              } else if file_type.is_file() {
                  let mut fd = item.open()?;
                  let chk = self.write(ObjectType::File, &mut fd)?;
-                 mtree.replace_file(item.file_name().into_string().or_else(invalid_filename)?, chk)?;
+                 mtree.replace_file(item.file_name()?, chk)?;
              }
          }
 
         Ok(())
+    }
+    pub fn write_dirpath_to_mtree(&mut self, dir: impl AsRef<Utf8Path>, mtree: &mut MutableTree) -> Result<(), RepoError> {
+        let dfd = Dir::open_ambient_dir(dir, ambient_authority())?;
+        self.write_dfd_to_mtree(dfd, mtree)
     }
 }
