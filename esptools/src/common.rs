@@ -4,8 +4,9 @@
 
 use std::{
     cmp::min,
+    ffi::{CStr, CString},
     io::{self, BorrowedBuf, Read, Seek, SeekFrom},
-    mem::{MaybeUninit, size_of}, ffi::{CStr, CString},
+    mem::{size_of, MaybeUninit},
 };
 
 use thiserror::Error;
@@ -14,7 +15,7 @@ pub trait ConstantSizedRecord {
 }
 
 pub trait RawRecord {
-	type Raw;
+    type Raw;
 }
 impl<R: RawRecord> ConstantSizedRecord for R {
     const SIZE: usize = size_of::<R::Raw>();
@@ -51,10 +52,10 @@ trait ReadExtSkip {
 }
 
 pub(crate) trait SkipExt: Read + Seek + Sized {
-	fn parse_from_span(&mut self, span: ReadSpan) -> io::Result<Box<[u8]>> {
-		self.seek(SeekFrom::Start(span.offset))?;
-		self.parse_bytes(span.size)
-	}
+    fn parse_from_span(&mut self, span: ReadSpan) -> io::Result<Box<[u8]>> {
+        self.seek(SeekFrom::Start(span.offset))?;
+        self.parse_bytes(span.size)
+    }
 }
 
 pub(crate) trait ReadExt: Read + Sized {
@@ -66,31 +67,31 @@ pub(crate) trait ReadExt: Read + Sized {
     }
     fn skip(&mut self, n: u64) -> io::Result<()> {
         self.skip_ext(n)
-	}
-	fn eat_tag<const N: usize>(&mut self, tag: &'static [u8; N]) -> Result<[u8; N]> {
-		let buf: [u8; N] = self.parse()?;
-		if buf == *tag {
-			Ok(*tag)
-		} else {
-			Err(Error::InvalidTag)
-		}
-	}
-	fn parse_bzstring(&mut self) -> Result<CString> {
-		let result = self.parse_bstring()?;
-		match CStr::from_bytes_with_nul(&result) {
-			Ok(s) => Ok(s.into()),
-			Err(_) => Err(Error::ParseError)
-		}
-	}
+    }
+    fn eat_tag<const N: usize>(&mut self, tag: &'static [u8; N]) -> Result<[u8; N]> {
+        let buf: [u8; N] = self.parse()?;
+        if buf == *tag {
+            Ok(*tag)
+        } else {
+            Err(Error::InvalidTag)
+        }
+    }
+    fn parse_bzstring(&mut self) -> Result<CString> {
+        let result = self.parse_bstring()?;
+        match CStr::from_bytes_with_nul(&result) {
+            Ok(s) => Ok(s.into()),
+            Err(_) => Err(Error::ParseError),
+        }
+    }
 
-	fn parse_bstring(&mut self) -> Result<Box<[u8]>> {
-		let len  = u8::from_le_bytes(self.parse()?);
-		Ok(self.parse_bytes(len as usize)?)
-	}
+    fn parse_bstring(&mut self) -> Result<Box<[u8]>> {
+        let len = u8::from_le_bytes(self.parse()?);
+        Ok(self.parse_bytes(len as usize)?)
+    }
 
-	fn parse<T: ParseCommon>(&mut self) -> Result<T> {
-		<T as ParseCommon>::parse(self)
-	}
+    fn parse<T: ParseCommon>(&mut self) -> Result<T> {
+        <T as ParseCommon>::parse(self)
+    }
 }
 
 impl<R: Read> ReadExt for R {}
@@ -100,14 +101,13 @@ impl<R: Read> ReadExtSkip for R {
         println!("Unbuffered");
         let mut buf: [MaybeUninit<u8>; 255] = MaybeUninit::uninit_array();
 
-        let mut bbuf = BorrowedBuf::from(&mut buf[0..n as usize]);
+        let mut bbuf = BorrowedBuf::from(&mut buf[..min(255, n) as usize]);
         loop {
             let sz = min(255, n);
             if sz == 0 {
                 break;
             }
-            self.read_buf_exact(bbuf.unfilled())?;
-            bbuf.clear();
+            self.read_buf_exact(BorrowedBuf::from(&mut buf[..sz as usize]).unfilled())?;
             n -= sz;
         }
         Ok(())
@@ -123,14 +123,14 @@ impl<R: Read + SeekPredicate> ReadExtSkip for R {
 }
 
 pub(crate) trait ParseCommon: Sized {
-	fn parse(input: &mut impl Read) -> Result<Self>;
+    fn parse(input: &mut impl Read) -> Result<Self>;
 }
 
 impl<const N: usize> ParseCommon for [u8; N] {
-	fn parse(input: &mut impl Read) -> Result<Self> {
-		let mut buf: [MaybeUninit<u8>; N] = MaybeUninit::uninit_array();
-		let mut bbuf: BorrowedBuf = (&mut buf[..]).into();
-		input.read_buf_exact(bbuf.unfilled())?;
-		Ok(unsafe { MaybeUninit::array_assume_init(buf) })
-	}
+    fn parse(input: &mut impl Read) -> Result<Self> {
+        let mut buf: [MaybeUninit<u8>; N] = MaybeUninit::uninit_array();
+        let mut bbuf: BorrowedBuf = (&mut buf[..]).into();
+        input.read_buf_exact(bbuf.unfilled())?;
+        Ok(unsafe { MaybeUninit::array_assume_init(buf) })
+    }
 }

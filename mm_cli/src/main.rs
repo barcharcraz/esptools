@@ -8,12 +8,12 @@ use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use log::{info};
 use mm_api_interaction::{api::sync::download_link, nxm::NXMUrl};
-use mm_store::{OsTreeRepo, mutable_tree::MutableTree};
+use mm_store::{OsTreeRepo, mutable_tree::MutableTree, ObjectType, Checksum, RepoRead};
 use serde::{Deserialize, Serialize};
 use std::{
     env::current_exe,
     fs::{self, File},
-    io::{self, Write},
+    io::{self, Write, Read},
     error::Error,
     path::PathBuf,
     str::FromStr,
@@ -106,8 +106,7 @@ impl MmCliCommand for config_cli {
                 let settings = Settings::load_or_default()?;
                 println!("{}: {}", key, settings.get(&key));
             }
-            Clear => Settings::load_or_default()?.save()?,
-            _ => (),
+            Clear => Settings::load_or_default()?.save()?
         })
     }
 }
@@ -124,7 +123,12 @@ enum store_cli_commands {
         dir: Utf8PathBuf
     },
     Init,
-    DumpRepo
+    DumpRepo,
+    CatFile {
+        #[arg(id="type")]
+        typ: ObjectType,
+        checksum: Checksum
+    }
 }
 
 impl MmCliCommand for store_cli {
@@ -143,6 +147,16 @@ impl MmCliCommand for store_cli {
             DumpRepo => {
                 let repo = OsTreeRepo::open(&self.repo_dir)?;
                 println!("{:?}", repo);
+            }
+            CatFile { typ, checksum } => {
+                let repo = OsTreeRepo::open(&self.repo_dir)?;
+                let Some(mut object) = repo.try_get(typ, &checksum)? else {
+                    println!("Object: {:?} not found in repo", checksum);
+                    return Ok(());
+                };
+                let mut content = String::new();
+                object.read_to_string(&mut content)?;
+                println!("{}", content);
             }
         })
     }
@@ -187,10 +201,6 @@ impl Settings {
             .ok_or(io::ErrorKind::NotFound)?
             .join("config.toml");
         Ok(path)
-    }
-    fn load_from_default_path() -> anyhow::Result<Self> {
-        info!("Loading from default path");
-        Ok(toml::from_str(&fs::read_to_string(Self::default_path()?)?)?)
     }
     fn load_or_default() -> anyhow::Result<Self> {
         match fs::read_to_string(Self::default_path()?) {

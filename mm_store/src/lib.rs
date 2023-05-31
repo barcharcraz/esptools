@@ -9,9 +9,14 @@
 #![feature(read_buf)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(min_specialization)]
+#![feature(rustc_attrs)]
+#![feature(maybe_uninit_uninit_array)]
+#![feature(concat_idents)]
 
 #[cfg(windows)]
 mod xattr_util;
+mod keyfile;
 pub mod repo;
 
 

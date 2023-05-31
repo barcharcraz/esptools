@@ -77,24 +77,24 @@ impl<'repo> MutableTree<'repo> {
             }
         }
     }
-    pub fn ensure_dir(&mut self, dir_name: String) -> Result<&mut MutableTree<'repo>, RepoError> {
+    pub fn ensure_dir(&mut self, dir_name: &str) -> Result<&mut MutableTree<'repo>, RepoError> {
         let tree = self.make_whole()?;
-        if tree.files.contains_key(&dir_name) {
+        if tree.files.contains_key(dir_name) {
             return Err(RepoErrorKind::InvalidMtree(format!(
                 "Can't replace file with directory: {dir_name}"
             )).into());
         }
-        Ok(tree.subdirs.entry(dir_name).or_insert(Self::new()))
+        Ok(tree.subdirs.entry(dir_name.into()).or_insert(Self::new()))
     }
-    pub fn replace_file(&mut self, file_name: String, chk: Checksum) -> Result<(), RepoError> {
+    pub fn replace_file(&mut self, file_name: &str, chk: Checksum) -> Result<(), RepoError> {
         let tree = self.make_whole()?;
-        if tree.subdirs.contains_key(&file_name) {
+        if tree.subdirs.contains_key(file_name) {
             return Err(RepoErrorKind::InvalidMtree(format!(
                 "Can't replace directory with file: {}",
                 file_name
             )).into());
         }
-        tree.files.insert(file_name, chk);
+        tree.files.insert(file_name.into(), chk);
         Ok(())
     }
 }

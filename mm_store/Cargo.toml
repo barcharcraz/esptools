@@ -18,10 +18,9 @@ features = [
 
 [dependencies]
 widestring = "*"
-cap-std = { version = "*", features = ["fs_utf8"] }
+cap-std = "*"
 thiserror = "*"
 serde = { version = "*", features = ["derive"] }
-toml = "*"
 serde_with = "*"
 zvariant = "*"
 strum = "*"
@@ -32,4 +31,8 @@ sha2 = "*"
 clap = "*"
 byteorder = "*"
 hex = "*"
-
+serde_ini = "*"
+paste = "*"
+base64 = "*"
+cap-tempfile = "*"
+io_tee = "*"
