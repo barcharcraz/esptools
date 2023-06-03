@@ -98,7 +98,7 @@ macro_rules! stamp_out_object_enum {
         $($name2:ident $(=$n2:literal)?),*
     ) => {
         #[derive(Debug, Display, PartialEq, Clone, Copy, AsRefStr, EnumString)]
-        #[strum(serialize_all = "kebab-case")]
+        #[strum(serialize_all = "lowercase")]
         pub enum ObjectType {
             $($name1 $(= $n)?,)*
             $($name2 $(= $n2)?,)*
