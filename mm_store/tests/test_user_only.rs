@@ -34,7 +34,8 @@ fn test1() -> Result<(), RepoError> {
 fn test_write_tree_1() {
     let mut repo = testrepo("test_write_tree_1").unwrap();
     let mut mtree = MutableTree::new();
-    repo.write_dirpath_to_mtree(&datapath(), &mut mtree).unwrap()
+    repo.write_dirpath_to_mtree(&datapath(), &mut mtree).unwrap();
+    mtree.make_lazy(&mut repo).unwrap();
 
 }
 // #[test]

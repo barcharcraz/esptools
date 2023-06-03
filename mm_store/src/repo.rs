@@ -208,14 +208,14 @@ impl Default for DirMeta {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Type)]
+#[derive(Serialize, Deserialize, Debug, Type, Clone)]
 #[zvariant(signature = "ayay")]
 pub struct DirTreeChecksums {
     pub checksum: Checksum,
     pub meta_checksum: Checksum,
 }
 
-#[derive(Serialize, Deserialize, Debug, Type)]
+#[derive(Serialize, Deserialize, Debug, Type, Default, Clone)]
 #[zvariant(signature = "(a(say)a(sayay))")]
 pub struct DirTree {
     pub files: BTreeMap<String, Checksum>,
@@ -407,10 +407,10 @@ pub mod traits {
     }
 }
 
-impl traits::RepoWrite<File> for OsTreeRepo {
+impl traits::RepoWrite<&File> for OsTreeRepo {
     type Error = RepoError;
 
-    fn write(&mut self, mut object: File) -> Result<Checksum, Self::Error> {
+    fn write(&mut self, mut object: &File) -> Result<Checksum, Self::Error> {
         fn write_header(mut w: impl Write, object: impl Read) -> io::Result<()> {
             let ctx = EncodingContext::<BE>::new_gvariant(0);
             let header = FileHeader::default();
@@ -424,7 +424,7 @@ impl traits::RepoWrite<File> for OsTreeRepo {
             Ok(())
         }
 
-        let mut temp_file: TempFile = TempFile::new(&self.tmp_dir_fd)?;
+        let mut temp_file = self.tmpfile_for_type(ObjectType::File)?;
         let mut hasher: Sha256 = Sha256::new();
         if self.config.core.mode != RepoMode::ArchiveZ2 {
             write_header(&mut hasher, &mut object)?;
@@ -436,37 +436,26 @@ impl traits::RepoWrite<File> for OsTreeRepo {
         // write to the hasher and the file
         copy(&mut object, &mut tee)?;
         let chk: Checksum = hasher.finalize().to_vec().into_boxed_slice().into();
-        let mut temp_name = PathBuf::from(chk.to_string());
-        temp_name.set_extension(loose_path_extension(ObjectType::File, self.config.core.mode));
-        temp_file.replace(&temp_name)?;
-        let loose_path = loose_path(&chk, ObjectType::File, self.config.core.mode);
-        self.objects_dir.create_dir(loose_path.parent().unwrap())?;
-        self.tmp_dir_fd.rename(temp_name, &self.objects_dir, loose_path)?;
+        temp_file.commit(&chk)?;
         Ok(chk)
     }
 }
 
-impl<T: Object + Serialize + Type> RepoWrite<T> for OsTreeRepo {
+impl<T: Object + Serialize + Type> RepoWrite<&T> for OsTreeRepo {
     type Error = RepoError;
 
-    fn write(&mut self, object: T) -> Result<Checksum, Self::Error> {
+    fn write(&mut self, object: &T) -> Result<Checksum, Self::Error> {
         let mut hasher = Sha256::new();
         let ctx = EncodingContext::<BE>::new_gvariant(0);
         let object_bytes = zvariant::to_bytes(ctx, &object).unwrap();
         hasher.update(&object_bytes);
         let chk: Checksum = hasher.finalize().to_vec().into_boxed_slice().into();
-        let temp_name = PathBuf::from(chk.to_string());
-        temp_name.set_extension(loose_path_extension(T::OBJECT_TYPE, self.config.core.mode));
-        let temp_fd = TempFile::new(&self.tmp_dir_fd)?;
-        temp_fd.write_all(&object_bytes);
-        temp_fd.replace(&temp_name)?;
-        let loose_path = loose_path(&chk, T::OBJECT_TYPE, self.config.core.mode);
-        self.objects_dir.create_dir(loose_path.parent().unwrap())?;
-        self.tmp_dir_fd.rename(temp_name, &self.objects_dir, loose_path)?;
+        let mut tmp = self.tmpfile_for_type(T::OBJECT_TYPE)?;
+        tmp.write_all(&object_bytes)?;
+        tmp.commit(&chk)?;
         Ok(chk)
     }
 }
-
 impl traits::RepoRead for OsTreeRepo {
     type Error = RepoError;
 
@@ -497,6 +486,36 @@ impl traits::RepoRead for OsTreeRepo {
 pub use traits::RepoRead;
 pub use traits::RepoWrite;
 pub use traits::RepoReadExt;
+
+#[derive(Debug)]
+struct OsTreeTempFile<'repo> {
+    file: TempFile<'repo>,
+    repo: &'repo OsTreeRepo,
+    typ: ObjectType
+}
+
+impl<'repo> Write for OsTreeTempFile<'repo> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl<'repo> OsTreeTempFile<'repo> {
+    fn commit(self, chk: &Checksum) -> io::Result<()> {
+        let mut temp_name = PathBuf::from(chk.to_string());
+        temp_name.set_extension(loose_path_extension(self.typ, self.repo.config.core.mode));
+        let final_name = loose_path(&chk, self.typ, self.repo.config.core.mode);
+        // TODO: implement rename in cap-tempfile, and use that instaed of this two-stage deal
+        self.file.replace(&temp_name)?;
+        self.repo.objects_dir.create_dir_all(&final_name)?;
+        self.repo.tmp_dir_fd.rename(temp_name, &self.repo.objects_dir, final_name)?;
+        Ok(())
+    }
+}
 
 impl OsTreeRepo {
     const STATE_DIRS: &[&'static str] = &[
@@ -566,7 +585,9 @@ impl OsTreeRepo {
         let p = loose_path(chk, typ, self.config.core.mode);
         self.objects_dir.open(p)
     }
-
+    fn tmpfile_for_type(&self, typ: ObjectType) -> io::Result<OsTreeTempFile> {
+        Ok(OsTreeTempFile { file: TempFile::new(&self.tmp_dir_fd)?, repo: self, typ })
+    }
     /// get a fd for a new object, if the object already exists you get an error with ErrorKind::AlreadyExists
     pub fn new_object_fd_mut(&self, typ: ObjectType, chk: &Checksum) -> io::Result<File> {
         if self.config.core.mode != RepoMode::BareUserOnly {
@@ -606,10 +627,9 @@ impl OsTreeRepo {
                 let mut child = mtree.ensure_dir(&filename)?;
                 self.write_dfd_to_mtree(item.open_dir()?, &mut child)?;
              } else if file_type.is_file() {
-                
                 println!("{:?}", filename);
-                let mut fd = item.open()?;
-                let chk = self.write(ObjectType::File, &mut fd)?;
+                let fd = item.open()?;
+                let chk = self.write(&fd)?;
                 mtree.replace_file(&filename, chk)?;
              }
          }

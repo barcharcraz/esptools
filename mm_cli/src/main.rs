@@ -154,9 +154,15 @@ impl MmCliCommand for store_cli {
                     println!("Object: {:?} not found in repo", checksum);
                     return Ok(());
                 };
-                let mut content = String::new();
-                object.read_to_string(&mut content)?;
-                println!("{}", content);
+                use ObjectType::*;
+                match typ {
+                    File => {
+                        let mut content = String::new();
+                        object.read_to_string(&mut content)?;
+                        println!("{}", content);
+                    }
+                    _ => println!("unsupported object type.")
+                }
             }
         })
     }
