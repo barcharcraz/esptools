@@ -487,6 +487,9 @@ pub use traits::RepoRead;
 pub use traits::RepoWrite;
 pub use traits::RepoReadExt;
 
+// Similar to cap-std::TempFile but just for ostree writing, knows the repo
+// to write to and the type of the object being written so when the user is done
+// writing and wants to finally add the object to the repo they can just call commit
 #[derive(Debug)]
 struct OsTreeTempFile<'repo> {
     file: TempFile<'repo>,
