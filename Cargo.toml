@@ -1,3 +1,8 @@
 [workspace]
-members = ["esptools", "symlink_hack", "mm_cli", "mm_store", "mm_api_interaction"]
+members = ["esptools", "symlink_hack", "mm_cli", "mm_store", "mm_api_interaction", "mm_archive"]
 default-members = ["esptools"]
+
+[workspace.package]
+edition = "2021"
+license = "LGPL-3.0-only"
+version = "0.1.0"

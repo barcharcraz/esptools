@@ -1,0 +1,12 @@
+[package]
+name = "mm_archive"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+zip = { version = "*", optional = true }
+lending-iterator = "*"
+
+[features]
+default = ["zip"]
