@@ -377,9 +377,14 @@ pub mod traits {
         }
     }
 
-    pub trait RepoWrite<T> {
+    pub trait RepoWriteObject<T> {
         type Error;
         fn write(&mut self, object: T) -> Result<Checksum, Self::Error>;
+    }
+
+    pub trait RepoWrite<T> {
+        type Error;
+        fn write(&mut self, object: T, typ: ObjectType) -> Result<Checksum, Self::Error>;
     }
 
     pub trait RepoReadExt<T>: RepoRead {
@@ -407,31 +412,31 @@ pub mod traits {
     }
 }
 
-impl traits::RepoWrite<&File> for OsTreeRepo {
+fn write_header(mut w: impl Write, object: impl Read) -> io::Result<()> {
+    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    let header = FileHeader::default();
+    let header_data = to_bytes(ctx, &header).unwrap();
+    let header_data_size = header_data.len();
+    assert!(header_data_size < u32::MAX as usize);
+    let mut header_size_pfx = [0u8; 8];
+    header_size_pfx[0..4].copy_from_slice(&(header_data_size as u32).to_be_bytes()[..]);
+    copy(&mut &header_size_pfx[..], &mut w)?;
+    copy(&mut header_data.as_slice(), &mut w)?;
+    Ok(())
+}
+
+impl<R: Read> traits::RepoWrite<R> for OsTreeRepo {
     type Error = RepoError;
 
-    fn write(&mut self, mut object: &File) -> Result<Checksum, Self::Error> {
-        fn write_header(mut w: impl Write, object: impl Read) -> io::Result<()> {
-            let ctx = EncodingContext::<BE>::new_gvariant(0);
-            let header = FileHeader::default();
-            let header_data = to_bytes(ctx, &header).unwrap();
-            let header_data_size = header_data.len();
-            assert!(header_data_size < u32::MAX as usize);
-            let mut header_size_pfx = [0u8; 8];
-            header_size_pfx[0..4].copy_from_slice(&(header_data_size as u32).to_be_bytes()[..]);
-            copy(&mut &header_size_pfx[..], &mut w)?;
-            copy(&mut header_data.as_slice(), &mut w)?;
-            Ok(())
-        }
-
-        let mut temp_file = self.tmpfile_for_type(ObjectType::File)?;
+    fn write(&mut self, object: R, typ: ObjectType) -> Result<Checksum, Self::Error> {
+        let mut temp_file = self.tmpfile_for_type(typ)?;
         let mut hasher: Sha256 = Sha256::new();
-        if self.config.core.mode != RepoMode::ArchiveZ2 {
+        if typ == ObjectType::File && self.config.core.mode != RepoMode::ArchiveZ2 {
             write_header(&mut hasher, &mut object)?;
         }
         let mut tee = (&mut hasher).tee(&mut temp_file);
-        if self.config.core.mode == RepoMode::ArchiveZ2 {
-            write_header(&mut tee, &mut object)?;
+        if typ == ObjectType::File && self.config.core.mode != RepoMode::ArchiveZ2 {
+            write_header(&mut hasher, &mut object)?;
         }
         // write to the hasher and the file
         copy(&mut object, &mut tee)?;
@@ -441,7 +446,15 @@ impl traits::RepoWrite<&File> for OsTreeRepo {
     }
 }
 
-impl<T: Object + Serialize + Type> RepoWrite<&T> for OsTreeRepo {
+impl traits::RepoWriteObject<&File> for OsTreeRepo {
+    type Error = RepoError;
+
+    fn write(&mut self, mut object: &File) -> Result<Checksum, Self::Error> {
+        self.write(object, ObjectType::File)
+    }
+}
+
+impl<T: Object + Serialize + Type> traits::RepoWriteObject<&T> for OsTreeRepo {
     type Error = RepoError;
 
     fn write(&mut self, object: &T) -> Result<Checksum, Self::Error> {

@@ -1,58 +1,74 @@
-use std::{io::{Read, Seek}, ops::Index, marker::PhantomData};
+use std::{
+    fs::File,
+    io::{self, Read, Seek},
+    marker::PhantomData,
+    ops::{ControlFlow, Index},
+    path::Path,
+};
 
-use crate::traits;
-use zip::result::ZipResult;
+use crate::traits::{self, ArchiveConsumer, EntryMetadata, ThinArchive, ThinArchiveEntry};
+use zip::{
+    read::ZipFile,
+    result::{ZipError, ZipResult},
+    ZipArchive,
+};
 
 pub struct Archive<R: Read + Seek>(pub(self) zip::read::ZipArchive<R>);
-pub struct Entry<'a>(pub(self) zip::read::ZipFile<'a>);
+pub struct Entry<'a>(pub zip::read::ZipFile<'a>);
 
-pub struct Iter<R: Read + Seek> {
-    archive: &'a zip::read::ZipArchive<R>,
-    i: usize
+impl Archive<File> {
+    fn _from_path(path: &Path) -> ZipResult<Self> { ZipArchive::new(File::open(path)?).map(Self) }
+    pub fn from_path(path: impl AsRef<Path>) -> ZipResult<Self> { Self::_from_path(path.as_ref()) }
 }
 
-impl<'a, R: Read + Seek> Iterator for Iter<'a, R>
+impl<R: Read + Seek> Archive<R> {
+    pub fn for_each_entry<B>(
+        &mut self,
+        mut f: impl FnMut(ZipResult<Entry>) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        for i in 0..self.0.len() {
+            let entry = self.0.by_index(i).map(Entry);
+            f(entry)?;
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> EntryMetadata for ZipFile<'a> {
+    type Error = time::error::ComponentRange;
+
+    fn is_dir(&self) -> bool { self.is_dir() }
+
+    fn is_file(&self) -> bool { self.is_file() }
+
+    fn is_symlink(&self) -> bool { false }
+
+    fn len(&self) -> u64 { self.size() }
+
+    fn modified(&self) -> Result<std::time::SystemTime, Self::Error> {
+        Ok(self.last_modified().to_time()?.into())
+    }
+}
+
+pub fn generate_thin_archive<H, C>(r: impl Read + Seek + Clone, mut consume: C) -> Result<ThinArchive<H>, ZipError>
+    where
+        C: ArchiveConsumer<H>,
+        ZipError: From<<C as ArchiveConsumer<H>>::Error>
 {
-    type Item = zip::result::ZipResult<Entry<'a>>;
-
-    #[inline]
-    fn next(&mut self) -> Option<zip::result::ZipResult<Entry<'a>>> {
-        if self.i >= self.archive.len() {
-            None
-        } else {
-            self.i += 1;
-            Some(
-                self.archive.by_index(self.i)
-                    .map(Entry)
-            )
-        }
+    let mut zip = ZipArchive::new(r.clone())?;
+    let mut result = Vec::<ThinArchiveEntry<H>>::with_capacity(zip.len());
+    let mut cumulative_metadata_read = 0;
+    let mut last_data_end = 0;
+    
+    for i in 0..zip.len() {
+        let entry = zip.by_index(i)?;
+        cumulative_metadata_read += entry.data_start() - last_data_end;
+        last_data_end = entry.data_start() + entry.compressed_size();
+        result.push(ThinArchiveEntry {
+            offset: cumulative_metadata_read as usize,
+            file: consume.consume(entry)?,
+        });
     }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.archive.len(), Some(self.archive.len()))
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n >= self.archive.len() {
-            None
-        } else {
-            self.i = n + 1;
-            Some(self.archive.by_index(n).map(Entry))
-        }
-    }
-
-}
-
-impl<'a, R: Read + Seek> ExactSizeIterator for Iter<R> {}
-
-impl<'a, R: Read + Seek> IntoIterator for &'a mut Archive<R> {
-    type Item = zip::result::ZipResult<Entry<'a>>;
-
-    type IntoIter = Iter<R>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        Self::IntoIter {
-            archive: &mut self.0,
-            i: 0
-        }
-    }
+    Ok(result.into_boxed_slice())
+    
 }

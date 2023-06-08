@@ -1,3 +1,3 @@
 pub mod traits;
-#[cfg(feature="zip")]
+#[cfg(feature = "zip")]
 pub mod zip_rs;
