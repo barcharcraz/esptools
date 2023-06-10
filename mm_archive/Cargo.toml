@@ -9,6 +9,12 @@ zip = { version = "*", optional = true }
 lending-iterator = "*"
 serde = "*"
 time = "*"
+tempfile = { version = "*", optional = true }
+num_enum = "*"
+strum = "*"
+strum_macros = "*"
+thiserror = "*"
 
 [features]
-default = ["zip"]
+default = ["7z_command"]
+7z_command = ["tempfile"]

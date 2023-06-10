@@ -22,4 +22,5 @@ pub mod repo;
 
 pub mod mutable_tree;
 pub mod perms;
+pub mod archive;
 pub use crate::repo::*;

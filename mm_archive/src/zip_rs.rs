@@ -3,18 +3,46 @@ use std::{
     io::{self, Read, Seek},
     marker::PhantomData,
     ops::{ControlFlow, Index},
-    path::Path,
+    path::Path, rc::Rc,
 };
 
-use crate::traits::{self, ArchiveConsumer, EntryMetadata, ThinArchive, ThinArchiveEntry};
+use crate::traits::{self, EntryMetadata, EntryMetadataData};
+use time::error::ComponentRange;
 use zip::{
     read::ZipFile,
     result::{ZipError, ZipResult},
     ZipArchive,
 };
 
-pub struct Archive<R: Read + Seek>(pub(self) zip::read::ZipArchive<R>);
-pub struct Entry<'a>(pub zip::read::ZipFile<'a>);
+pub struct Archive<R: Read + Seek>(zip::read::ZipArchive<R>);
+
+pub struct Entry<'a, R: Read + Seek> {
+    archive: &'a mut Archive<R>,
+    metadata: EntryMetadataData<ComponentRange>,
+    idx: usize
+}
+
+impl<'ar, R: Read + Seek> traits::Entry for Entry<'ar, R> {
+    type Error = ZipError;
+
+    type Metadata = EntryMetadataData<ComponentRange>;
+
+    type UncompressedRead<'a> = ZipFile<'a> where Self: 'a;
+
+    type CompressedRead<'a> = ZipFile<'a> where Self: 'a;
+
+    fn metadata(&self) -> Self::Metadata {
+        self.metadata
+    }
+
+    fn uncompressed_data<'a>(&'a mut self) -> Result<Self::UncompressedRead<'a>, Self::Error> {
+        self.archive.0.by_index_raw(self.idx)
+    }
+
+    fn compressed_data<'a>(&'a mut self) -> Result<Self::UncompressedRead<'a>, Self::Error> {
+        self.archive.0.by_index(self.idx)
+    }
+}
 
 impl Archive<File> {
     fn _from_path(path: &Path) -> ZipResult<Self> { ZipArchive::new(File::open(path)?).map(Self) }
@@ -24,18 +52,27 @@ impl Archive<File> {
 impl<R: Read + Seek> Archive<R> {
     pub fn for_each_entry<B>(
         &mut self,
-        mut f: impl FnMut(ZipResult<Entry>) -> ControlFlow<B>,
+        mut f: impl FnMut(Result<Entry<R>, ZipError>) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
         for i in 0..self.0.len() {
-            let entry = self.0.by_index(i).map(Entry);
+            let entry = self.0.by_index_raw(i).map(|f| Entry {
+                metadata: EntryMetadataData::new(f),
+                archive: self,
+                idx: i
+            });
             f(entry)?;
         }
         ControlFlow::Continue(())
     }
 }
 
+struct Iter<'a, R: Read + Seek> {
+    archive: &'a mut ZipArchive<R>,
+    idx: usize,
+}
+
 impl<'a> EntryMetadata for ZipFile<'a> {
-    type Error = time::error::ComponentRange;
+    type Error = ComponentRange;
 
     fn is_dir(&self) -> bool { self.is_dir() }
 
@@ -48,27 +85,14 @@ impl<'a> EntryMetadata for ZipFile<'a> {
     fn modified(&self) -> Result<std::time::SystemTime, Self::Error> {
         Ok(self.last_modified().to_time()?.into())
     }
-}
 
-pub fn generate_thin_archive<H, C>(r: impl Read + Seek + Clone, mut consume: C) -> Result<ThinArchive<H>, ZipError>
-    where
-        C: ArchiveConsumer<H>,
-        ZipError: From<<C as ArchiveConsumer<H>>::Error>
-{
-    let mut zip = ZipArchive::new(r.clone())?;
-    let mut result = Vec::<ThinArchiveEntry<H>>::with_capacity(zip.len());
-    let mut cumulative_metadata_read = 0;
-    let mut last_data_end = 0;
-    
-    for i in 0..zip.len() {
-        let entry = zip.by_index(i)?;
-        cumulative_metadata_read += entry.data_start() - last_data_end;
-        last_data_end = entry.data_start() + entry.compressed_size();
-        result.push(ThinArchiveEntry {
-            offset: cumulative_metadata_read as usize,
-            file: consume.consume(entry)?,
-        });
+    fn compression_method(&self) -> traits::CompressionMethod {
+        match self.compression() {
+            zip::CompressionMethod::Stored => traits::CompressionMethod::Store,
+            zip::CompressionMethod::Deflated => traits::CompressionMethod::Deflate,
+            _ => traits::CompressionMethod::Unknown,
+        }
     }
-    Ok(result.into_boxed_slice())
-    
+
+    fn compression_level(&self) -> Option<u8> { None }
 }

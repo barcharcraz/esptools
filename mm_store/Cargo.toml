@@ -36,3 +36,4 @@ paste = "*"
 base64 = "*"
 cap-tempfile = "*"
 io_tee = "*"
+mm_archive = { path = "../mm_archive" }
