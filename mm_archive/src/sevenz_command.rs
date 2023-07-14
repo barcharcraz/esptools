@@ -1,5 +1,5 @@
 use num_enum::{FromPrimitive, TryFromPrimitive, TryFromPrimitiveError};
-use std::{ffi::OsString, fmt::Display, io, path::Path, process::Command, sync::Arc, fs::{self, File}};
+use std::{ffi::OsString, fmt::Display, io, path::Path, process::Command, sync::Arc, fs::{self, File, ReadDir}};
 use strum_macros::Display;
 use tempfile::{tempdir, tempdir_in, TempDir};
 use thiserror::Error;
@@ -70,13 +70,18 @@ impl traits::Entry for Entry {
 
     type Metadata = fs::Metadata;
 
-    type UncompressedRead<'a> = &'a File where Self: 'a;
+    type UncompressedRead<'a> = File;
 
     fn metadata(&self) -> Result<Self::Metadata, Self::Error> {
         self.0.metadata()
     }
 
-    fn uncompressed_data<'a>(&'a mut self) -> Result<Self::UncompressedRead<'a>, Self::Error> {
-        Ok(&self.0)
+    fn uncompressed_data(&mut self) -> Result<File, Self::Error> {
+        Ok(self.0.try_clone()?)
     }
+}
+
+
+pub struct Iter {
+    inner: ReadDir
 }
