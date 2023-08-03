@@ -100,8 +100,6 @@ impl<R: Read> ReadExtSkip for R {
     default fn skip_ext(&mut self, mut n: u64) -> io::Result<()> {
         println!("Unbuffered");
         let mut buf: [MaybeUninit<u8>; 255] = MaybeUninit::uninit_array();
-
-        let mut bbuf = BorrowedBuf::from(&mut buf[..min(255, n) as usize]);
         loop {
             let sz = min(255, n);
             if sz == 0 {
