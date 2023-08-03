@@ -5,7 +5,7 @@ use std::{
     time::SystemTime,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, zvariant::Type)]
 pub enum CompressionMethod {
     Store,
     Deflate,

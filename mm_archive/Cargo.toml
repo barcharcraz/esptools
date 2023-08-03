@@ -14,6 +14,7 @@ num_enum = "*"
 strum = "*"
 strum_macros = "*"
 thiserror = "*"
+zvariant = "*"
 
 [features]
 default = ["7z_command"]

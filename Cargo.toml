@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["esptools", "symlink_hack", "mm_cli", "mm_store", "mm_api_interaction", "mm_archive"]
-default-members = ["esptools"]
+default-members = ["mm_cli"]
 
 [workspace.package]
 edition = "2021"

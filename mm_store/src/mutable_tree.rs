@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Checksum, DirMeta, DirTree, DirTreeChecksums, OsTreeRepo, RepoError, RepoErrorKind, RepoReadExt, RepoWrite,
+    Checksum, DirMeta, DirTree, DirTreeChecksums, OsTreeRepo, RepoError, RepoErrorKind, RepoReadExt, RepoWrite, RepoWriteObject
 };
 
 #[derive(Debug, Clone)]
