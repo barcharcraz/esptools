@@ -22,7 +22,7 @@ use crate::common::*;
 
 
 bitflags! {
-
+	#[derive(Debug, PartialEq, Eq)]
     pub struct ArchiveFlags: u32 {
         const INCLUDE_DIR_NAMES = 1 << 0;
         const INCLUDE_FILE_NAMES = 1 << 1;
@@ -35,6 +35,8 @@ bitflags! {
         const EMBED_FILE_NAMES = 1 << 8;
         const XMEM_CODEC = 1 << 9;
     }
+
+	#[derive(Debug, PartialEq, Eq)]
     pub struct FileFlags: u16 {
         const MESHES = 1 << 0;
         const TEXTURES = 1 << 1;
