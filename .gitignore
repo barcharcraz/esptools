@@ -1,2 +1,5 @@
 build/
 test/
+.cache/
+.idea/
+CMakeLists.txt.user

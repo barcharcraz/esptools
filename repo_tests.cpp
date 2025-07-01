@@ -1,7 +1,7 @@
-
+module;
 #include <QtCore>
 #include <QTest>
-import repo;
+module repo;
 
 
 
@@ -16,10 +16,29 @@ private slots:
     void  loose_path() {
         using enum ObjectType;
         using enum RepoMode;
+        
         auto path = ::loose_path(QByteArray::fromHex("abcdef"), DirMeta, Bare);
         QVERIFY(path == "ab/cdef.dir-meta");
     }
+
+    void tuple_iterator() {
+        using namespace gvariant;
+        const uint8_t data[] = {
+            0x74, 0x65, 0x01, 0x01
+        };
+        tupleIterator it(data);
+        QVERIFY(it.data.data() == data && it.data.size() == 4);
+        QVERIFY((*it).size() == 1 && (*it)[0] == 0x74);
+        ++it;
+        QVERIFY(it.data.data() == data+1 && it.data.size() == 2);
+        QVERIFY((*it).size() == 1 && (*it)[0] == 0x65);
+        ++it;
+        QVERIFY(it.data.data() == data+2 && it.data.size() == 0);
+        QVERIFY((*it).size() == 0);
+
+    }
 };
+
 
 #include "repo_tests.moc"
 

@@ -1,12 +1,5 @@
 // -*- C++ -*-
 module;
-#include <vector>
-#include <string_view>
-#include <filesystem>
-#include <span>
-#include <variant>
-#include <map>
-#include <string>
 #include <QtDBus>
 #include <QtCore>
 export module repo;
@@ -16,9 +9,137 @@ using std::pair;
 using std::span;
 using std::string;
 using std::string_view;
+using std::tuple;
 using std::vector;
+using std::array;
 using std::filesystem::path;
+using std::integral;
+namespace ranges = std::ranges;
 using namespace std::string_view_literals;
+
+// serialization into gvariant
+
+namespace gvariant {
+
+static size_t offset_size_for(size_t n) {
+    if(n > UINT32_MAX) {
+        return 8;
+    }
+    if(n > UINT16_MAX) {
+        return 4;
+    }
+    if(n > UINT8_MAX) {
+        return 2;
+    }
+    if(n > 0) {
+        return 1;
+    }
+    return 0;
+
+}
+static size_t offset_size(span<const uint8_t> data) {
+    return offset_size_for(data.size());
+}
+
+size_t read_integral(span<const uint8_t> data) {
+    array<uint8_t, sizeof(size_t)> buf{};
+    ranges::copy(data, buf.begin());
+    if constexpr(std::endian::native == std::endian::big) {
+        ranges::reverse(buf);
+    }
+    return std::bit_cast<size_t>(buf);
+}
+
+static size_t next_offset(span<const uint8_t> data) {
+    return read_integral(data.last(offset_size(data)));
+}
+class serializer {
+    vector<uint8_t> data;
+    vector<uint8_t> meta;
+};
+
+struct serializedTuple {
+    span<const uint8_t> data;
+    span<const uint8_t> get_varsize_member() {
+        size_t offset = next_offset(data);
+        auto result = data.first(offset);
+        data = data.subspan(offset, data.size() - offset - offset_size(data));
+        return result;
+    }
+    span<const uint8_t> get_fixedsize_member(size_t size) {
+        auto result = data.first(size);
+        data = data.subspan(size);
+        return result;
+    }
+};
+
+struct serializedArray {
+    struct offsets {
+        size_t elm_size;
+        span<const uint8_t> data;
+        explicit offsets(const span<const uint8_t>& value)
+            : elm_size(offset_size(value)),
+              data(value.subspan(next_offset(value))) {}
+        size_t size() const {
+            return data.size() / elm_size;
+        }
+        size_t operator[](size_t pos) const {
+            return read_integral(data.subspan(pos * elm_size, elm_size));
+        }
+        size_t at(size_t pos) const {
+            if(pos >= size()) {
+                throw std::out_of_range("offset out of range");
+            }
+            return (*this)[pos];
+        }
+    };
+
+    span<const uint8_t> data;
+    size_t size() const {
+        // offset of the start of the offsets
+        // and the end of the data
+        return offsets().size() / offset_size(data);
+    }
+    span<const uint8_t> at(size_t pos) const {
+        offsets off(data);
+        size_t end = off.at(pos);
+        size_t begin = pos ? off.at(pos-1) : 0;
+        return span(data.begin() + begin, data.begin() + end);
+    }
+    span<const uint8_t> operator[](size_t pos) const {
+        offsets off(data);
+        size_t end = off[pos];
+        size_t begin = pos ? off[pos-1] : 0;
+        return span(data.begin() + begin, data.begin() + end);
+    }
+private:
+    span<const uint8_t> offsets() const {
+        return data.subspan(next_offset(data));
+    }
+};
+
+struct tupleIterator {
+    using difference_type = ptrdiff_t;
+    using value_type = span<const uint8_t>;
+    span<const unsigned char> data;
+
+    span<const unsigned char> operator*() const {
+        size_t offset = next_offset(data);
+        return data.first(offset);
+    }
+    tupleIterator& operator++() {
+        size_t offset = next_offset(data);
+        size_t size = data.size() - offset - offset_size(data);
+        data = data.subspan(offset, size);
+        return *this;
+    }
+    void operator++(int) {
+        ++*this;
+    }
+};
+static_assert(std::input_iterator<tupleIterator>);
+}
+
 export enum class ObjectType {
     DirTree,
     DirMeta,
@@ -123,6 +244,26 @@ public:
     map<string, QByteArray> files;
     map<string, DirTreeChecksums> dirs;
 };
+
+struct DirTreeChecksumEntry {
+    string name;
+    QByteArray checksum;
+    QByteArray meta_checksum;
+};
+
+const QDBusArgument& operator<<(QDBusArgument& argument, const DirTreeChecksumEntry& entry) {
+    argument.beginStructure();
+    argument << entry.name;
+    argument << entry.checksum;
+    argument << entry.meta_checksum;
+    argument.endStructure();
+    return argument;
+}
+
+const QDBusArgument& operator<<(QDBusArgument& argument, const DirTree& tree) {
+    argument << vector<pair<string_view, QByteArray>>(std::from_range_t{}, tree.files);
+    return argument;
+}
 
 export class FileHeader {
 public:
