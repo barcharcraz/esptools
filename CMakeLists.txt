@@ -14,14 +14,16 @@ enable_testing()
 find_package(Qt6 REQUIRED COMPONENTS Core Test DBus)
 
 find_package(Threads)
-find_library(BINDFLTAPI_LIB bindfltapi PATHS ${CMAKE_CURRENT_LIST_DIR} NO_DEFAULT_PATH)
 
-target_link_libraries(__cmake_cxx26 PRIVATE Threads::Threads)
+#target_link_libraries(__cmake_cxx26 PRIVATE Threads::Threads)
+if(WIN32)
+    find_library(BINDFLTAPI_LIB bindfltapi PATHS ${CMAKE_CURRENT_LIST_DIR} NO_DEFAULT_PATH)
+    qt_add_library(bindlib OBJECT)
+    target_sources(bindlib PUBLIC FILE_SET CXX_MODULES FILES bindlib.cppm)
+    target_link_libraries(bindlib PUBLIC ${BINDFLTAPI_LIB} Threads::Threads)
 
-qt_add_library(bindlib OBJECT)
-target_sources(bindlib PUBLIC FILE_SET CXX_MODULES FILES bindlib.cppm)
-target_link_libraries(bindlib PUBLIC ${BINDFLTAPI_LIB} Threads::Threads)
-
+    add_subdirectory(bind_tools)
+endif()
 
 
 qt_add_library(repo OBJECT)
@@ -31,4 +33,4 @@ target_link_libraries(repo PRIVATE Qt6::Core Qt6::DBus Threads::Threads)
 add_executable(alltests repo_tests.cpp)
 target_link_libraries(alltests PRIVATE Qt6::Core Qt6::Test Threads::Threads repo)
 add_test(NAME alltests COMMAND alltests)
-add_subdirectory(bind_tools)
+

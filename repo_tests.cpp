@@ -37,6 +37,16 @@ private slots:
         QVERIFY((*it).size() == 0);
 
     }
+
+    void framing_offsets() {
+        gvariant::serializer b;
+        b.data.data_.resize(100);
+        b.data.meta_ = {40, 39, 5};
+        b.write_framing_offsets(b.data.meta_.begin());
+        QVERIFY(b.data.data_[100] == 40);
+        QVERIFY(b.data.data_[101] == 39);
+        QVERIFY(b.data.data_[102] == 5);
+    }
 };
 
 

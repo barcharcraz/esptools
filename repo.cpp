@@ -14,11 +14,14 @@ using std::vector;
 using std::array;
 using std::filesystem::path;
 using std::integral;
+using std::same_as;
+using std::bit_cast;
 namespace ranges = std::ranges;
+namespace views = std::views;
 using namespace std::string_view_literals;
 
 // serialization into gvariant
-
+class TestRepo;
 namespace gvariant {
 
 static size_t offset_size_for(size_t n) {
@@ -50,13 +53,98 @@ size_t read_integral(span<const uint8_t> data) {
     return std::bit_cast<size_t>(buf);
 }
 
+
 static size_t next_offset(span<const uint8_t> data) {
     return read_integral(data.last(offset_size(data)));
 }
-class serializer {
-    vector<uint8_t> data;
-    vector<uint8_t> meta;
+
+
+// quick and dirty gvariant serializer, currently just serializes to a vector in-memory
+struct serializer_data {
+    vector<uint8_t> data_;
+    vector<size_t> meta_;
 };
+class array_of_fixed_serializer;
+class array_of_variable_serializer;
+class serializer_base {
+    friend ::TestRepo;
+protected:
+    serializer_data& s;
+    explicit serializer_base(serializer_data& data)
+        : s(data) {}
+    void write_framing_offsets(decltype(s.meta_)::iterator start) {
+        s.data_.append_range(span(start, s.meta_.end())
+        | views::transform(bit_cast<array<uint8_t, sizeof(size_t)>, size_t>)
+        | views::transform(views::take(offset_size_for(s.data_.size())))
+        | views::join);
+        s.meta_.erase(start, s.meta_.end());
+    }
+    void serialize_fixed(span<const uint8_t> value) {
+        s.data_.append_range(value);
+    }
+    void serialize_string(string_view str) {
+        s.data_.append_range(str);
+        s.data_.push_back(0);
+    }
+    array_of_fixed_serializer begin_fixed_array();
+    array_of_variable_serializer begin_variable_array();
+    // template<class T> requires integral<T>
+    // auto& operator<<(T value) {
+    //     auto arr = std::bit_cast<array<const uint8_t, sizeof(T)>>(value);
+    //     serialize_primitive(arr);
+    //     return *this;
+    // }
+    // auto& operator<<(double value) {
+    //     serialize_primitive(bit_cast<array<const uint8_t, sizeof value>>(value));
+    //     return *this;
+    // }
+};
+
+class serializer : public serializer_base {
+    friend ::TestRepo;
+
+    serializer_data data;
+public:
+    serializer()
+        : serializer_base(data) {}
+};
+
+class array_of_fixed_serializer: public serializer_base {
+    using serializer_base::serializer_base;
+    size_t element_size;
+public:
+    void serialize_fixed(span<const uint8_t> value) {
+        assert(value.size() == element_size);
+        serializer_base::serialize_fixed(value);
+    }
+    void end_fixed_array() {}
+};
+class array_of_variable_serializer : public serializer_base {
+    size_t data_start;
+    size_t meta_start;
+    friend class serializer_base;
+
+    array_of_variable_serializer(serializer_data& data)
+        : serializer_base(data), 
+        data_start(s.data_.size()), 
+        meta_start(s.meta_.size()) {}
+public:
+    void serialize_variable(span<const uint8_t> value) {
+        s.data_.append_range(value);
+        size_t offset = s.data_.size() - data_start;
+        s.meta_.push_back(offset);
+    }
+    void end_variable_array() {
+        write_framing_offsets(s.meta_.begin() + meta_start);
+    }
+};
+
+array_of_fixed_serializer serializer_base::begin_fixed_array() {
+    return array_of_fixed_serializer(s);
+}
+array_of_variable_serializer serializer_base::begin_variable_array() {
+    return array_of_variable_serializer(s);
+}
 
 struct serializedTuple {
     span<const uint8_t> data;
@@ -74,10 +162,10 @@ struct serializedTuple {
 };
 
 struct serializedArray {
-    struct offsets {
+    struct arrayOffsets {
         size_t elm_size;
         span<const uint8_t> data;
-        explicit offsets(const span<const uint8_t>& value)
+        explicit arrayOffsets(const span<const uint8_t>& value)
             : elm_size(offset_size(value)),
               data(value.subspan(next_offset(value))) {}
         size_t size() const {
@@ -101,20 +189,20 @@ struct serializedArray {
         return offsets().size() / offset_size(data);
     }
     span<const uint8_t> at(size_t pos) const {
-        offsets off(data);
+        auto off = offsets();
         size_t end = off.at(pos);
         size_t begin = pos ? off.at(pos-1) : 0;
         return span(data.begin() + begin, data.begin() + end);
     }
     span<const uint8_t> operator[](size_t pos) const {
-        offsets off(data);
+        auto off = offsets();
         size_t end = off[pos];
         size_t begin = pos ? off[pos-1] : 0;
         return span(data.begin() + begin, data.begin() + end);
     }
 private:
-    span<const uint8_t> offsets() const {
-        return data.subspan(next_offset(data));
+    arrayOffsets offsets() const {
+        return arrayOffsets(data);
     }
 };
 
