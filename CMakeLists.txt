@@ -27,7 +27,7 @@ endif()
 
 
 qt_add_library(repo OBJECT)
-target_sources(repo PUBLIC FILE_SET CXX_MODULES FILES repo.cpp)
+target_sources(repo PUBLIC FILE_SET CXX_MODULES FILES repo.cppm)
 target_link_libraries(repo PRIVATE Qt6::Core Qt6::DBus Threads::Threads)
 
 add_executable(alltests repo_tests.cpp)
