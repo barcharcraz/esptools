@@ -419,6 +419,25 @@ public:
 };
 
 export class MoblRepo {
-    
+    QDir repo_dir;
+    QDir objects_dir;
+    QDir temp_dir;
 public:
+    static MoblRepo create_repo(const QString& path) {
+        const string_view state_dirs[] = {
+            "tmp",
+            "extensions",
+            "state",
+            "refs",
+            "refs/heads",
+            "refs/mirrors",
+            "refs/remotes",
+            "objects",
+        };
+        QDir repo_dir(path);
+        repo_dir.mkdir("");
+        for(auto& dir : state_dirs) {
+
+        }
+    }
 };
