@@ -1,4 +1,5 @@
 // -*- C++ -*-
+#include <system_error>
 module;
 #include <QtDBus>
 #include <QtCore>
@@ -423,7 +424,7 @@ export class MoblRepo {
     QDir objects_dir;
     QDir temp_dir;
 public:
-    static MoblRepo create_repo(const QString& path) {
+    static std::expected<MoblRepo, std::error_code> create_repo(const QString& path) {
         const string_view state_dirs[] = {
             "tmp",
             "extensions",
