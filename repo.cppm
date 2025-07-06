@@ -1,7 +1,5 @@
 // -*- C++ -*-
-#include <system_error>
 module;
-#include <QtDBus>
 #include <QtCore>
 export module repo;
 import std;
@@ -389,26 +387,6 @@ gvariant::serializer& operator<<(gvariant::serializer& ser, const DirTree& tree)
     return ser;
 }
 
-struct DirTreeChecksumEntry {
-    string name;
-    QByteArray checksum;
-    QByteArray meta_checksum;
-};
-
-const QDBusArgument& operator<<(QDBusArgument& argument, const DirTreeChecksumEntry& entry) {
-    argument.beginStructure();
-    argument << entry.name;
-    argument << entry.checksum;
-    argument << entry.meta_checksum;
-    argument.endStructure();
-    return argument;
-}
-
-const QDBusArgument& operator<<(QDBusArgument& argument, const DirTree& tree) {
-    argument << vector<pair<string_view, QByteArray>>(std::from_range_t{}, tree.files);
-    return argument;
-}
-
 export class FileHeader {
 public:
     uint32_t uid = 0;
@@ -420,25 +398,27 @@ public:
 };
 
 export class MoblRepo {
-    QDir repo_dir;
-    QDir objects_dir;
-    QDir temp_dir;
+    std::filesystem::path repo_dir;
 public:
-    static std::expected<MoblRepo, std::error_code> create_repo(const QString& path) {
-        const string_view state_dirs[] = {
-            "tmp",
-            "extensions",
-            "state",
-            "refs",
-            "refs/heads",
-            "refs/mirrors",
-            "refs/remotes",
-            "objects",
+    std::filesystem::path tmp_dir() const {
+        return repo_dir / "tmp";
+    }
+    static bool create_repo(const std::filesystem::path& path) {
+        const QStringView state_dirs[] = {
+            u"tmp",
+            u"extensions",
+            u"state",
+            u"refs",
+            u"refs/heads",
+            u"refs/mirrors",
+            u"refs/remotes",
+            u"objects",
         };
         QDir repo_dir(path);
-        repo_dir.mkdir("");
+        if(!repo_dir.mkdir("")) return false;
         for(auto& dir : state_dirs) {
-
+            if(!repo_dir.mkdir(dir.toString())) return false;
         }
+        return true;
     }
 };
