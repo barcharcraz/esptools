@@ -604,7 +604,7 @@ impl OsTreeRepo {
         let p = loose_path(chk, typ, self.config.core.mode);
         self.objects_dir.open(p)
     }
-    fn tmpfile_for_type(&self, typ: ObjectType) -> io::Result<OsTreeTempFile> {
+    fn tmpfile_for_type(&self, typ: ObjectType) -> io::Result<OsTreeTempFile<'_>> {
         Ok(OsTreeTempFile {
             file: TempFile::new(&self.tmp_dir_fd)?,
             repo: self,

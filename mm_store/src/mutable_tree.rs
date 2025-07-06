@@ -127,7 +127,7 @@ impl<'repo> MutableTree<'repo> {
         }
     }
 
-    pub fn make_lazy<'a>(&mut self, repo: &'a mut OsTreeRepo) -> Result<&'a mut MutableTreeLazy, RepoError>
+    pub fn make_lazy<'a>(&'_ mut self, repo: &'a mut OsTreeRepo) -> Result<&'a mut MutableTreeLazy<'_>, RepoError>
     where
         'a: 'repo
     {

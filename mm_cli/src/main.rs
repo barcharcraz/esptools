@@ -17,7 +17,7 @@ use std::{
     stringify,
 };
 
-#[enum_dispatch(mm_cli_subcommands)]
+#[enum_dispatch(MmCliSubcommands)]
 trait MmCliCommand {
     fn run(self) -> anyhow::Result<()>;
 }
