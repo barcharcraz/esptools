@@ -34,7 +34,7 @@ struct mm_cli {
 enum mm_cli_subcommands {
     Api(api_cli),
     Config(config_cli),
-    Store(store_cli)
+    Store(StoreCli)
 }
 
 #[derive(Args)]
@@ -76,11 +76,11 @@ impl MmCliCommand for api_cli {
 #[derive(Args)]
 struct config_cli {
     #[command(subcommand)]
-    command: config_cli_commands,
+    command: ConfigCliCommands,
 }
 
 #[derive(Subcommand)]
-enum config_cli_commands {
+enum ConfigCliCommands {
     Get { key: String },
     Set { key: String, value: String },
     List,
@@ -89,7 +89,7 @@ enum config_cli_commands {
 
 impl MmCliCommand for config_cli {
     fn run(self) -> anyhow::Result<()> {
-        use config_cli_commands::*;
+        use ConfigCliCommands::*;
         Ok(match self.command {
             List => {
                 println!("{:#?}", Settings::load_or_default()?);
@@ -109,13 +109,13 @@ impl MmCliCommand for config_cli {
 }
 
 #[derive(Args)]
-struct store_cli {
+struct StoreCli {
     repo_dir: Utf8PathBuf,
     #[command(subcommand)]
-    command: store_cli_commands
+    command: StoreCliCommands
 }
 #[derive(Subcommand)]
-enum store_cli_commands {
+enum StoreCliCommands {
     WriteDirTree {
         dir: Utf8PathBuf
     },
@@ -128,10 +128,10 @@ enum store_cli_commands {
     }
 }
 
-impl MmCliCommand for store_cli {
+impl MmCliCommand for StoreCli {
     fn run(self) -> anyhow::Result<()> {
         
-        use store_cli_commands::*;
+        use StoreCliCommands::*;
         Ok(match self.command {
             WriteDirTree { dir } => {
                 let mut repo = OsTreeRepo::open(&self.repo_dir)?;
