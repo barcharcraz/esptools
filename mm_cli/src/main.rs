@@ -5,7 +5,6 @@
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
-use log::{info};
 use mm_api_interaction::{api::sync::download_link, nxm::NXMUrl};
 use mm_store::{OsTreeRepo, mutable_tree::MutableTree, ObjectType, Checksum, RepoRead};
 use serde::{Deserialize, Serialize};
@@ -13,10 +12,9 @@ use std::{
     env::current_exe,
     fs::{self, File},
     io::{self, Write, Read},
-    error::Error,
     path::PathBuf,
     str::FromStr,
-    stringify, borrow::Borrow, backtrace::Backtrace, any,
+    stringify,
 };
 
 #[enum_dispatch(mm_cli_subcommands)]
@@ -132,7 +130,7 @@ enum store_cli_commands {
 
 impl MmCliCommand for store_cli {
     fn run(self) -> anyhow::Result<()> {
-        use camino::{Utf8PathBuf, Utf8Path};
+        
         use store_cli_commands::*;
         Ok(match self.command {
             WriteDirTree { dir } => {
