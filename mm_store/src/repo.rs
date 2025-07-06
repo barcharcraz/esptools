@@ -9,7 +9,7 @@ use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
 use cap_tempfile::TempFile;
 use hex::FromHexError;
 use io_tee::{ReadExt, WriteExt};
-use serde::{de::IntoDeserializer, Deserialize, Serialize};
+use serde::{de::{DeserializeOwned, IntoDeserializer}, Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
@@ -62,11 +62,12 @@ fn to_bytes_gv(value: &(impl Serialize + Type)) -> Vec<u8> {
     to_bytes(ctx, value).unwrap().to_vec()
 }
 
-fn from_slice_gv<'de, 'r: 'de, T: Deserialize<'de> + Type>(slice: &'r [u8]) -> zvariant::Result<T> {
+fn from_slice_gv<'de, 'r: 'de, T: DeserializeOwned + Type>(slice: &'r [u8]) -> zvariant::Result<T> {
     let ctx = Context::new_gvariant(Endian::Big, 0);
     
-    let data: Data<'r, 'static> = zvariant::serialized::Data::new(slice, ctx);
-    data.deserialize().map(|e|e.0)
+    let data: Data<'de, 'static> = zvariant::serialized::Data::new(slice, ctx);
+    //T::deserialize(data)
+    data.deserialize().map(move |e|e.0)
 }
 
 fn gv_hash(value: &(impl Serialize + Type)) -> Checksum {
@@ -414,7 +415,7 @@ pub mod traits {
 }
 
 fn write_header(mut w: impl Write, object: impl Read) -> io::Result<()> {
-    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    let ctx = Context::new_gvariant(Endian::Big, 0);
     let header = FileHeader::default();
     let header_data = to_bytes(ctx, &header).unwrap();
     let header_data_size = header_data.len();
@@ -422,7 +423,7 @@ fn write_header(mut w: impl Write, object: impl Read) -> io::Result<()> {
     let mut header_size_pfx = [0u8; 8];
     header_size_pfx[0..4].copy_from_slice(&(header_data_size as u32).to_be_bytes()[..]);
     copy(&mut &header_size_pfx[..], &mut w)?;
-    copy(&mut header_data.as_slice(), &mut w)?;
+    copy(&mut &*header_data, &mut w)?;
     Ok(())
 }
 
@@ -461,7 +462,7 @@ impl<T: Object + Serialize + Type> traits::RepoWriteObject<&T> for OsTreeRepo {
 
     fn write(&mut self, object: &T) -> Result<Checksum, Self::Error> {
         let mut hasher = Sha256::new();
-        let ctx = EncodingContext::<BE>::new_gvariant(0);
+        let ctx = Context::new_gvariant(Endian::Big, 0);
         let object_bytes = zvariant::to_bytes(ctx, &object).unwrap();
         hasher.update(&object_bytes);
         let chk: Checksum = hasher.finalize().to_vec().into_boxed_slice().into();
