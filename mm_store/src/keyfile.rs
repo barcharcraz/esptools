@@ -22,7 +22,7 @@ trait SkipExt: Read + Sized {
 }
 impl<R: Read> SkipExt for R {
     default fn skip(&mut self, mut n: u64) -> io::Result<()> {
-        let mut buf: [MaybeUninit<u8>; 255] = MaybeUninit::uninit_array();
+        let mut buf = [const { MaybeUninit::<u8>::uninit() }; 255];
         loop {
             let sz = min(255, n);
             if sz == 0 {

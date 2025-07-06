@@ -14,7 +14,7 @@ num_enum = "*"
 strum = "*"
 strum_macros = "*"
 thiserror = "*"
-zvariant = "*"
+zvariant = { workspace = true }
 
 [features]
 default = ["7z_command"]

@@ -22,7 +22,7 @@ cap-std = "*"
 thiserror = "*"
 serde = { version = "*", features = ["derive"] }
 serde_with = "*"
-zvariant = "*"
+zvariant = {workspace = true}
 strum = "*"
 strum_macros = "*"
 digest = "*"

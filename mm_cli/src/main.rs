@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-only
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
