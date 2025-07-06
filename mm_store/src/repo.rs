@@ -9,7 +9,7 @@ use cap_std::{ambient_authority, fs::*, io_lifetimes::AsFilelike};
 use cap_tempfile::TempFile;
 use hex::FromHexError;
 use io_tee::{ReadExt, WriteExt};
-use serde::{Deserialize, Serialize};
+use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use sha2::{Digest, Sha256};
 use std::{
@@ -24,7 +24,7 @@ use std::{
 };
 use strum_macros::{AsRefStr, Display, EnumString};
 use thiserror::Error;
-use zvariant::{from_slice, to_bytes, EncodingContext, Maybe, OwnedValue, Type};
+use zvariant::{gvariant, serialized::{Context, Data, Format}, to_bytes, Endian, OwnedValue, Type};
 
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Type, Default, Clone)]
@@ -56,15 +56,17 @@ impl FromStr for Checksum {
 }
 
 fn to_bytes_gv(value: &(impl Serialize + Type)) -> Vec<u8> {
-    let ctx = EncodingContext::<BE>::new_gvariant(0);
+    let ctx = Context::new(Format::GVariant, Endian::Big, 0);
     // any errors should be impossible, we use str to enforce utf-8, and it's a precondition violation
     // to get bogus types
-    to_bytes(ctx, value).unwrap()
+    to_bytes(ctx, value).unwrap().to_vec()
 }
 
 fn from_slice_gv<'de, 'r: 'de, T: Deserialize<'de> + Type>(slice: &'r [u8]) -> zvariant::Result<T> {
-    let ctx = EncodingContext::<BE>::new_gvariant(0);
-    from_slice(slice, ctx)
+    let ctx = Context::new_gvariant(Endian::Big, 0);
+    
+    let data: Data<'r, 'static> = zvariant::serialized::Data::new(slice, ctx);
+    data.deserialize().map(|e|e.0)
 }
 
 fn gv_hash(value: &(impl Serialize + Type)) -> Checksum {

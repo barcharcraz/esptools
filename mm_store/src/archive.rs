@@ -10,5 +10,5 @@ pub struct ThinArchiveEntry {
     compressed_file: Checksum,
     uncompressed_file: Checksum,
     compression_method: CompressionMethod,
-    compression_level: Option<u8>
+    compression_level: i8
 }
