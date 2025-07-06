@@ -24,33 +24,33 @@ trait MmCliCommand {
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct mm_cli {
+struct MmCli {
     #[command(subcommand)]
-    command: mm_cli_subcommands,
+    command: MmCliSubcommands,
 }
 
 #[derive(Subcommand)]
 #[enum_dispatch]
-enum mm_cli_subcommands {
-    Api(api_cli),
-    Config(config_cli),
+enum MmCliSubcommands {
+    Api(ApiCli),
+    Config(ConfigCli),
     Store(StoreCli)
 }
 
 #[derive(Args)]
-struct api_cli {
+struct ApiCli {
     #[command(subcommand)]
-    command: api_cli_commands,
+    command: ApiCliCommands,
 }
 
 #[derive(Subcommand)]
-enum api_cli_commands {
+enum ApiCliCommands {
     DownloadLink { nxmurl: String },
 }
 
-impl MmCliCommand for api_cli {
+impl MmCliCommand for ApiCli {
     fn run(self) -> anyhow::Result<()> {
-        use api_cli_commands::*;
+        use ApiCliCommands::*;
         match self.command {
             DownloadLink { nxmurl } => {
                 let settings = Settings::load_or_default()?;
@@ -74,7 +74,7 @@ impl MmCliCommand for api_cli {
 }
 
 #[derive(Args)]
-struct config_cli {
+struct ConfigCli {
     #[command(subcommand)]
     command: ConfigCliCommands,
 }
@@ -87,7 +87,7 @@ enum ConfigCliCommands {
     Clear,
 }
 
-impl MmCliCommand for config_cli {
+impl MmCliCommand for ConfigCli {
     fn run(self) -> anyhow::Result<()> {
         use ConfigCliCommands::*;
         Ok(match self.command {
@@ -221,6 +221,6 @@ impl Settings {
 
 fn main() {
     env_logger::init();
-    let cli = mm_cli::parse();
+    let cli = MmCli::parse();
     cli.command.run().unwrap();
 }
