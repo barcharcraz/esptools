@@ -39,16 +39,16 @@ private slots:
     }
 
     void framing_offsets() {
-        gvariant::serializer b;
-        b.data.data_.resize(100);
-        b.data.meta_ = {40, 39, 5};
-        b.write_framing_offsets(b.data.meta_.begin());
-        QVERIFY(b.data.data_[100] == 40);
-        QVERIFY(b.data.data_[101] == 39);
-        QVERIFY(b.data.data_[102] == 5);
+        vector<uint8_t> data;
+        gvariant::serializer b(data);
+        b.data_.resize(100);
+        b.meta_ = {40, 39, 5};
+        b.write_framing_offsets(b.meta_.begin());
+        QVERIFY(b.data_[100] == 40);
+        QVERIFY(b.data_[101] == 39);
+        QVERIFY(b.data_[102] == 5);
     }
 };
-
 
 #include "repo_tests.moc"
 

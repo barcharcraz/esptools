@@ -58,6 +58,11 @@ static size_t next_offset(span<const uint8_t> data) {
     return read_integral(data.last(offset_size(data)));
 }
 
+static ranges::view auto framing_offsets(ranges::range auto&& rng, size_t offset_size) {
+    return rng | views::transform(bit_cast<array<uint8_t, sizeof(size_t)>, size_t>)
+        | views::transform(views::take(offset_size))
+        | views::join;
+}
 
 // quick and dirty gvariant serializer, currently just serializes to a vector in-memory
 struct serializer_data {
@@ -66,28 +71,99 @@ struct serializer_data {
 };
 class array_of_fixed_serializer;
 class array_of_variable_serializer;
-class serializer_base {
+class tuple_serializer;
+
+class serializer {
     friend ::TestRepo;
-protected:
-    serializer_data& s;
-    explicit serializer_base(serializer_data& data)
-        : s(data) {}
-    void write_framing_offsets(decltype(s.meta_)::iterator start) {
-        s.data_.append_range(span(start, s.meta_.end())
-        | views::transform(bit_cast<array<uint8_t, sizeof(size_t)>, size_t>)
-        | views::transform(views::take(offset_size_for(s.data_.size())))
-        | views::join);
-        s.meta_.erase(start, s.meta_.end());
+    vector<uint8_t>& data_;
+    vector<size_t> meta_;
+    struct container_data {
+        size_t data_start;
+        size_t meta_start;
+        char container;
+    };
+    vector<container_data> container_stack;
+    size_t element_size = 0;
+    void push_container(char c) {
+        container_stack.push_back({
+            .data_start = data_.size(),
+            .meta_start = meta_.size(),
+            .container = c
+        });
     }
-    void serialize_fixed(span<const uint8_t> value) {
-        s.data_.append_range(value);
+    size_t data_start() {
+        if(!container_stack.empty()) {
+            return container_stack.back().data_start;
+        } else {
+            return 0;
+        }
+    }
+    container_data verify_container(char c) {
+        if(container_stack.empty()) {
+            qFatal("invalid gvariant serializer state: no container");
+        }
+        auto data = container_stack.back();
+        container_stack.pop_back();
+        if(data.container != c) {
+            qFatal("invalid gvariant serializer state: wrong container type");
+        }
+        return data;
+    }
+        
+    void write_framing_offsets(decltype(meta_)::iterator start) {
+        data_.append_range(framing_offsets(span(start, meta_.end()), offset_size(data_)));
+        meta_.erase(start, meta_.end());
+    }
+public:
+    explicit serializer(vector<uint8_t> data) 
+        : data_(data) {}
+    template<class R> 
+        requires ranges::input_range<R> && 
+        std::convertible_to<ranges::range_reference_t<R>, uint8_t>
+
+    void serialize_fixed(R&& value) {
+        data_.append_range(value);
     }
     void serialize_string(string_view str) {
-        s.data_.append_range(str);
-        s.data_.push_back(0);
+        data_.append_range(str);
+        data_.push_back(0);
     }
-    array_of_fixed_serializer begin_fixed_array();
-    array_of_variable_serializer begin_variable_array();
+    template<class R> 
+    requires ranges::input_range<R> && 
+        std::convertible_to<ranges::range_reference_t<R>, uint8_t>
+    void serialize_variable(R&& value) {
+        if(this->element_size != 0) {
+            qFatal("expected only fixed size elements");
+        }
+        data_.append_range(value);
+        size_t offset = data_.size() - data_start();
+        meta_.push_back(offset);
+    }
+    void begin_fixed_array(size_t element_size) {
+        this->element_size = element_size;
+    }
+    void end_fixed_array() {
+        this->element_size = 0;
+    }
+    void begin_variable_array() {
+        push_container('a');
+    }
+    void end_variable_array() {
+        auto [_, meta_start, _] = verify_container('a');
+        write_framing_offsets(meta_.begin() + meta_start);
+    }
+    void begin_tuple() {
+        push_container('(');
+    }
+    void end_tuple() {
+        auto [_, meta_start, _] = verify_container('(');
+        data_.append_range(
+            framing_offsets(
+                span(meta_.begin() + meta_start, meta_.end()) 
+                    | views::reverse, 
+                offset_size(data_)));
+        meta_.erase(meta_.begin() + meta_start, meta_.end());
+    }
     // template<class T> requires integral<T>
     // auto& operator<<(T value) {
     //     auto arr = std::bit_cast<array<const uint8_t, sizeof(T)>>(value);
@@ -99,52 +175,6 @@ protected:
     //     return *this;
     // }
 };
-
-class serializer : public serializer_base {
-    friend ::TestRepo;
-
-    serializer_data data;
-public:
-    serializer()
-        : serializer_base(data) {}
-};
-
-class array_of_fixed_serializer: public serializer_base {
-    using serializer_base::serializer_base;
-    size_t element_size;
-public:
-    void serialize_fixed(span<const uint8_t> value) {
-        assert(value.size() == element_size);
-        serializer_base::serialize_fixed(value);
-    }
-    void end_fixed_array() {}
-};
-class array_of_variable_serializer : public serializer_base {
-    size_t data_start;
-    size_t meta_start;
-    friend class serializer_base;
-
-    array_of_variable_serializer(serializer_data& data)
-        : serializer_base(data), 
-        data_start(s.data_.size()), 
-        meta_start(s.meta_.size()) {}
-public:
-    void serialize_variable(span<const uint8_t> value) {
-        s.data_.append_range(value);
-        size_t offset = s.data_.size() - data_start;
-        s.meta_.push_back(offset);
-    }
-    void end_variable_array() {
-        write_framing_offsets(s.meta_.begin() + meta_start);
-    }
-};
-
-array_of_fixed_serializer serializer_base::begin_fixed_array() {
-    return array_of_fixed_serializer(s);
-}
-array_of_variable_serializer serializer_base::begin_variable_array() {
-    return array_of_variable_serializer(s);
-}
 
 struct serializedTuple {
     span<const uint8_t> data;
@@ -327,11 +357,36 @@ public:
     QByteArray meta_checksum;
 };
 
+gvariant::serializer& operator<<(gvariant::serializer& ser, const DirTreeChecksums& chk) {
+    ser.serialize_variable(chk.checksum);
+    ser.serialize_variable(chk.meta_checksum);
+    return ser;
+}
+
 export class DirTree {
 public:
     map<string, QByteArray> files;
     map<string, DirTreeChecksums> dirs;
 };
+gvariant::serializer& operator<<(gvariant::serializer& ser, const DirTree& tree) {
+    ser.begin_variable_array();
+    for(auto& [k, v] : tree.files) {
+        ser.begin_tuple();
+        ser.serialize_string(k);
+        ser.serialize_variable(v);
+        ser.end_tuple();
+    }
+    ser.end_variable_array();
+    ser.begin_variable_array();
+    for(auto& [k, v] : tree.dirs) {
+        ser.begin_tuple();
+        ser.serialize_string(k);
+        ser << v;
+        ser.end_tuple();
+    }
+    ser.end_variable_array();
+    return ser;
+}
 
 struct DirTreeChecksumEntry {
     string name;
@@ -364,7 +419,6 @@ public:
 };
 
 export class MoblRepo {
-
-
+    
 public:
 };
