@@ -3,18 +3,19 @@ module;
 #include <QtCore>
 export module repo;
 import std;
+using std::array;
+using std::bit_cast;
+using std::integral;
 using std::map;
+using std::optional;
 using std::pair;
+using std::same_as;
 using std::span;
 using std::string;
 using std::string_view;
 using std::tuple;
 using std::vector;
-using std::array;
 using std::filesystem::path;
-using std::integral;
-using std::same_as;
-using std::bit_cast;
 namespace ranges = std::ranges;
 namespace views = std::views;
 using namespace std::string_view_literals;
@@ -303,6 +304,13 @@ export enum class RepoMode {
     ArchiveZ2,
     BareSplitXattrs
 };
+constexpr string_view RepoMode_names[] = {
+    "bare",
+    "bare-user",
+    "bare-user-only",
+    "archive-z2",
+    "bare-split-xattrs"
+};
 
 export constexpr string loose_path_extension(ObjectType type, RepoMode mode) {
     string result(ObjectType_names[static_cast<size_t>(type)]);
@@ -398,27 +406,37 @@ public:
 };
 
 export class MoblRepo {
-    std::filesystem::path repo_dir;
+    friend ::std::optional<MoblRepo>;
+  QString repo_dir;
+  std::unique_ptr<QSettings> repo_settings;
+
+  explicit MoblRepo(QString repo_dir)
+    : repo_dir(static_cast<QString&&>(repo_dir)), 
+      repo_settings(new QSettings(QDir(repo_dir).filePath("config"))) {}
+
 public:
-    std::filesystem::path tmp_dir() const {
-        return repo_dir / "tmp";
+  static optional<MoblRepo> create_repo(const QString &path) {
+    const QStringView state_dirs[] = {
+        u"tmp",        u"extensions",   u"state",        u"refs",
+        u"refs/heads", u"refs/mirrors", u"refs/remotes", u"objects",
+    };
+    QDir repo_dir(path);
+    if (!repo_dir.mkdir(""))
+      return std::nullopt;
+    for (auto &dir : state_dirs) {
+      if (!repo_dir.mkdir(dir.toString()))
+        return std::nullopt;
     }
-    static bool create_repo(const std::filesystem::path& path) {
-        const QStringView state_dirs[] = {
-            u"tmp",
-            u"extensions",
-            u"state",
-            u"refs",
-            u"refs/heads",
-            u"refs/mirrors",
-            u"refs/remotes",
-            u"objects",
-        };
-        QDir repo_dir(path);
-        if(!repo_dir.mkdir("")) return false;
-        for(auto& dir : state_dirs) {
-            if(!repo_dir.mkdir(dir.toString())) return false;
-        }
-        return true;
+    QFile settings_file(repo_dir.filePath("config"));
+    if(!settings_file.open(QFile::WriteOnly | QFile::NewOnly)) {
+        return std::nullopt;
     }
+    settings_file.write(
+        "[core]\n"
+        "repo_version=1\n"
+        "mode=bare-user-only\n"
+    );
+    settings_file.close();
+    return std::optional<MoblRepo>(MoblRepo{path});
+  }
 };
